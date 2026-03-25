@@ -35,6 +35,9 @@ CMakeSettings.json
 out/
 .cache/
 
+# Project notes (local only)
+NEXT_STEPS.md
+
 # Windows
 Thumbs.db
 desktop.ini

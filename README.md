@@ -4,7 +4,7 @@ A fast, clean desktop Bible reader for Windows built with C++, ImGui, and SQLite
 
 ## Download
 
-Grab the latest single-file `.exe` from the [Releases](../../releases) page — no installer, no dependencies.
+Grab the latest single-file `.exe` from the [Releases](https://github.com/badcircle/The-Holy-Bible/releases) page — no installer, no dependencies.
 
 ## Features
 

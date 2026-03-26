@@ -278,6 +278,20 @@ def build_db(src: Path, dst: Path, decode_html: bool = False, strip_tags: bool =
         print(f"    No verses found, skipping.")
         return
 
+    # Normalize chapter numbers to be sequential starting from 1 for each book.
+    # Some source files use non-1-based chapter numbering (e.g. Additions to
+    # Esther chapters 10-16, Epistle of Jeremiah chapter 6 only).
+    book_orig_chs: dict = defaultdict(set)
+    for tid, bid, ch, v, text in verses:
+        book_orig_chs[(tid, bid)].add(ch)
+    ch_remap: dict = {}  # (tid, bid, orig_ch) -> new_ch
+    for (tid, bid), orig_set in book_orig_chs.items():
+        for new_ch, orig_ch in enumerate(sorted(orig_set), 1):
+            ch_remap[(tid, bid, orig_ch)] = new_ch
+    if any(k[2] != v for k, v in ch_remap.items()):
+        verses = [(tid, bid, ch_remap[(tid, bid, ch)], v, text)
+                  for tid, bid, ch, v, text in verses]
+
     # Compute stats
     chapter_verses: dict = defaultdict(set)   # (tid,bid,ch) -> {verse_ids}
     for tid, bid, ch, v, _ in verses:

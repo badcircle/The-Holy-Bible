@@ -176,6 +176,63 @@ for code, (tid, bid, short, long) in BOOK_MAP.items():
     if key not in BOOK_INFO:
         BOOK_INFO[key] = (short, long)
 
+# KJV-specific long names (traditional 1611 canonical titles).
+# Keyed by (testament_id, book_id); only applied when building KJV.db.
+KJV_LONG_NAMES = {
+    (OT,  1): "The First Book of Moses, called Genesis",
+    (OT,  2): "The Second Book of Moses, called Exodus",
+    (OT,  3): "The Third Book of Moses, called Leviticus",
+    (OT,  4): "The Fourth Book of Moses, called Numbers",
+    (OT,  5): "The Fifth Book of Moses, called Deuteronomy",
+    (OT,  6): "The Book of Joshua",
+    (OT,  7): "The Book of Judges",
+    (OT,  8): "The Book of Ruth",
+    (OT,  9): "The First Book of Samuel, otherwise called the First Book of the Kings",
+    (OT, 10): "The Second Book of Samuel, otherwise called the Second Book of the Kings",
+    (OT, 11): "The First Book of the Kings, commonly called the Third Book of the Kings",
+    (OT, 12): "The Second Book of the Kings, commonly called the Fourth Book of the Kings",
+    (OT, 13): "The First Book of the Chronicles",
+    (OT, 14): "The Second Book of the Chronicles",
+    (OT, 16): "The Book of Nehemiah",
+    (OT, 17): "The Book of Esther",
+    (OT, 18): "The Book of Job",
+    (OT, 19): "The Book of Psalms",
+    (OT, 20): "The Proverbs",
+    (OT, 21): "Ecclesiastes, or, The Preacher",
+    (OT, 22): "The Song of Solomon",
+    (OT, 23): "The Book of the Prophet Isaiah",
+    (OT, 24): "The Book of the Prophet Jeremiah",
+    (OT, 25): "The Lamentations of Jeremiah",
+    (OT, 26): "The Book of the Prophet Ezekiel",
+    (OT, 27): "The Book of Daniel",
+    (NT,  1): "The Gospel According to Saint Matthew",
+    (NT,  2): "The Gospel According to Saint Mark",
+    (NT,  3): "The Gospel According to Saint Luke",
+    (NT,  4): "The Gospel According to Saint John",
+    (NT,  6): "The Epistle of Paul the Apostle to the Romans",
+    (NT,  7): "The First Epistle of Paul the Apostle to the Corinthians",
+    (NT,  8): "The Second Epistle of Paul the Apostle to the Corinthians",
+    (NT,  9): "The Epistle of Paul the Apostle to the Galatians",
+    (NT, 10): "The Epistle of Paul the Apostle to the Ephesians",
+    (NT, 11): "The Epistle of Paul the Apostle to the Philippians",
+    (NT, 12): "The Epistle of Paul the Apostle to the Colossians",
+    (NT, 13): "The First Epistle of Paul the Apostle to the Thessalonians",
+    (NT, 14): "The Second Epistle of Paul the Apostle to the Thessalonians",
+    (NT, 15): "The First Epistle of Paul the Apostle to Timothy",
+    (NT, 16): "The Second Epistle of Paul the Apostle to Timothy",
+    (NT, 17): "The Epistle of Paul the Apostle to Titus",
+    (NT, 18): "The Epistle of Paul the Apostle to Philemon",
+    (NT, 19): "The Epistle of Paul the Apostle to the Hebrews",
+    (NT, 20): "The General Epistle of James",
+    (NT, 21): "The First Epistle General of Peter",
+    (NT, 22): "The Second General Epistle of Peter",
+    (NT, 23): "The First Epistle General of John",
+    (NT, 24): "The Second Epistle General of John",
+    (NT, 25): "The Third Epistle General of John",
+    (NT, 26): "The General Epistle of Jude",
+    (NT, 27): "The Revelation of Saint John the Divine",
+}
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -250,7 +307,8 @@ def create_indexes(cur):
 # Core converter
 # ---------------------------------------------------------------------------
 
-def build_db(src: Path, dst: Path, decode_html: bool = False, strip_tags: bool = False):
+def build_db(src: Path, dst: Path, decode_html: bool = False, strip_tags: bool = False,
+             long_name_overrides: dict = None):
     print(f"  {src.name}")
 
     verses = []          # (tid, bid, ch, v, text)
@@ -314,6 +372,8 @@ def build_db(src: Path, dst: Path, decode_html: bool = False, strip_tags: bool =
     # Books
     for (tid, bid) in sorted(used_books):
         short, long = BOOK_INFO.get((tid, bid), ("???", "Unknown"))
+        if long_name_overrides:
+            long = long_name_overrides.get((tid, bid), long)
         cur.execute("INSERT INTO Books VALUES (?,?,?,?)", (tid, bid, short, long))
 
     # Bible — one verse per row, Passage1 = "chapter:verse text"
@@ -347,22 +407,22 @@ def build_db(src: Path, dst: Path, decode_html: bool = False, strip_tags: bool =
 # ---------------------------------------------------------------------------
 
 CONVERSIONS = [
-    # (source file,        output db,          decode_html, strip_tags)
-    ("kjvdat.txt",         "KJV.db",            False,       False),
-    ("sept.txt",           "Septuagint.db",     False,       False),
-    ("vuldat.txt",         "Vulgate.db",        True,        False),
-    ("ugntdat.txt",        "UGNT.db",           False,       False),
-    ("tanakh_utf.dat",     "Tanakh.db",         False,       True),
-    ("apodat.txt",         "Apocrypha.db",      False,       False),
+    # (source file,        output db,          decode_html, strip_tags,  long_name_overrides)
+    ("kjvdat.txt",         "KJV.db",            False,       False,       KJV_LONG_NAMES),
+    ("sept.txt",           "Septuagint.db",     False,       False,       None),
+    ("vuldat.txt",         "Vulgate.db",        True,        False,       None),
+    ("ugntdat.txt",        "UGNT.db",           False,       False,       None),
+    ("tanakh_utf.dat",     "Tanakh.db",         False,       True,        None),
+    ("apodat.txt",         "Apocrypha.db",      False,       False,       None),
 ]
 
 if __name__ == "__main__":
     print(f"Converting Bible texts in {BIBLES_DIR}\n")
-    for src_name, dst_name, decode_html, strip_tags in CONVERSIONS:
+    for src_name, dst_name, decode_html, strip_tags, long_names in CONVERSIONS:
         src = BIBLES_DIR / src_name
         dst = BIBLES_DIR / dst_name
         if not src.exists():
             print(f"  Skipping {src_name} (not found)")
             continue
-        build_db(src, dst, decode_html, strip_tags)
+        build_db(src, dst, decode_html, strip_tags, long_names)
     print("\nDone.")

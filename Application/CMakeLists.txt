@@ -132,7 +132,13 @@ target_link_libraries(imgui PUBLIC
 add_executable(BibleReader WIN32
     src/main.cpp
     src/bible_db.cpp
-    src/app.cpp
+    src/app_init.cpp
+    src/app_render.cpp
+    src/render_sidebar.cpp
+    src/render_cover.cpp
+    src/render_tray.cpp
+    src/render_reader.cpp
+    src/render_toolbar.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/resources.rc"
 )
 

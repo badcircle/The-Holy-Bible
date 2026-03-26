@@ -25,6 +25,7 @@ struct AppFonts {
     ImFont* verse_num   = nullptr;  // Small numbered superscript-style
     ImFont* ui          = nullptr;  // Sans-serif for buttons/labels
     ImFont* hebrew      = nullptr;  // Noto Serif Hebrew (RTL translations)
+    ImFont* dropcap     = nullptr;  // Pirata One, large — chapter-opening illuminated initials
 };
 
 struct AppState {

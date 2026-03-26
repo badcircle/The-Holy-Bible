@@ -13,7 +13,7 @@
 
 #include "app.h"
 
-// stb_image — declaration only; implementation is compiled in app.cpp
+// stb_image — declaration only; implementation is compiled in app_init.cpp
 #include "stb_image.h"
 
 #include <cstdio>
@@ -137,6 +137,13 @@ static void setup_fonts(AppFonts& fonts, float body_size = FONT_BODY_SIZE) {
         nullptr, RES_FONT_HEADING);
 
     // ------------------------------------------------------------------
+    // Dropcap — Pirata One, large (~3.5× body) for illuminated initials
+    // ------------------------------------------------------------------
+    fonts.dropcap = load_font(io,
+        "Pirata_One/PirataOne-Regular.ttf", body_size * 3.5f, &cfg_serif,
+        nullptr, RES_FONT_HEADING);
+
+    // ------------------------------------------------------------------
     // Verse numbers — Crimson Pro (lighter weight, smaller)
     // ------------------------------------------------------------------
     fonts.verse_num = load_font(io,
@@ -170,6 +177,7 @@ static void setup_fonts(AppFonts& fonts, float body_size = FONT_BODY_SIZE) {
     if (!fonts.verse_num)  fonts.verse_num  = io.FontDefault;
     if (!fonts.ui)         fonts.ui         = io.FontDefault;
     if (!fonts.hebrew)     fonts.hebrew     = fonts.body;
+    if (!fonts.dropcap)    fonts.dropcap    = fonts.title;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,68 @@
+Source Structure
+================
+
+Entry point
+-----------
+main.cpp            SDL2/OpenGL init, font atlas (setup_fonts), style, main loop.
+                    Calls app_render() each frame; handles font rebuild on size change.
+
+Application state
+-----------------
+app.h               AppFonts, AppState structs; public API declarations.
+bible_db.h/.cpp     SQLite wrapper — book/verse queries, DB open/close.
+book_names.h        book_display_name() — canonical display names keyed by testament+book_id.
+resources.h         Windows RCDATA resource IDs for embedded fonts, images, databases.
+
+App logic (non-rendering)
+--------------------------
+app_init.cpp        Translations (discover, open, switch), cover texture loading,
+                    app_init / app_shutdown, navigation (app_load_chapter,
+                    app_open_book, app_go_prev/next_chapter).
+                    Also defines internal helpers used across render files:
+                      find_book(), current_book_index(), name_is_rtl(),
+                      open_translation_db().
+
+Shared headers (included by render files)
+-----------------------------------------
+app_internal.h      Forward-declares all cross-file helpers and render functions;
+                    also defines TOOLBAR_H constant.
+colors.h            Palette constants (COL_BG_DARK, COL_TEXT_BODY, COL_VERSE_NUM, …).
+rtl.h               Header-only RTL helpers: rtl_reverse(), rtl_decode_utf8(),
+                    rtl_encode_utf8(), rtl_is_combining().
+                    Used in render_reader.cpp for Hebrew verse display.
+
+Render files
+------------
+app_render.cpp      app_render() — top-level compositor; calls all render_* functions.
+
+render_toolbar.cpp  render_toolbar() — title bar, chapter nav, translation dropdown,
+                    font-size buttons, tray/sidebar toggles, keyboard shortcuts.
+                    render_shortcuts_popup() — F1 help overlay.
+
+render_sidebar.cpp  render_sidebar() — scrollable book list with testament headers.
+
+render_cover.cpp    render_cover() — cover image splash (shown until a book is selected).
+
+render_tray.cpp     tray_load_verse() — fetches verse text from all translations.
+                    render_tray() — parallel-verse panel that slides in from the right.
+
+render_reader.cpp   render_reader() — main reading view:
+                      • Chapter heading (book title + "Chapter N" in Pirata One)
+                      • Dropcap for verse 1 (Pirata One large, framed in gold)
+                      • Multi-column layout with balanced verse distribution
+                      • RTL (Hebrew) word-wrap and display
+                      • Bottom prev/next navigation buttons
+                    render_context_popup() [static] — "Bible at a Glance" modal,
+                    only called from render_reader.
+
+Rough line counts (after split)
+--------------------------------
+app_init.cpp            ~260
+render_reader.cpp       ~410  (largest — contains the dropcap + RTL logic)
+render_toolbar.cpp      ~230  (toolbar + shortcuts popup combined)
+render_tray.cpp         ~200
+render_sidebar.cpp       ~80
+render_cover.cpp         ~45
+app_render.cpp           ~55
+colors.h / rtl.h /
+app_internal.h           ~50 each

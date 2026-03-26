@@ -1,0 +1,23 @@
+Options -Indexes
+RewriteEngine On
+
+# If serving from a subdirectory (e.g. /Website/), set RewriteBase to match:
+#   RewriteBase /Website/
+# If serving from the root, leave as-is:
+RewriteBase /
+
+# Serve real files and directories directly (style.css, api.php, Bibles/, etc.)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# /trans/tid/book/ch  →  index.php?trans=…&tid=…&book=…&ch=…
+RewriteRule ^([a-zA-Z]+)/([0-9]+)/([0-9]+)/([0-9]+)/?$ index.php?trans=$1&tid=$2&book=$3&ch=$4 [L,QSA]
+
+# /trans/tid/book     →  chapter 1
+RewriteRule ^([a-zA-Z]+)/([0-9]+)/([0-9]+)/?$ index.php?trans=$1&tid=$2&book=$3&ch=1 [L,QSA]
+
+# /trans/tid
+RewriteRule ^([a-zA-Z]+)/([0-9]+)/?$ index.php?trans=$1&tid=$2 [L,QSA]
+
+# /trans
+RewriteRule ^([a-zA-Z]+)/?$ index.php?trans=$1 [L,QSA]

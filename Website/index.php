@@ -10,6 +10,9 @@
 
 $BIBLES_DIR = __DIR__ . '/Bibles';
 
+// Base path for pretty URLs. Change to '/Website/' if not served from root.
+define('BASE_PATH', '/');
+
 // ---------------------------------------------------------------------------
 // Canonical display names, ported from book_names.h
 // Falls back to the DB's LongName for unknown IDs.
@@ -225,20 +228,19 @@ function get_chapter(PDO $pdo, int $tid, int $book_id, int $chapter): array {
 // Build a nav URL preserving all current state except what changes
 // ---------------------------------------------------------------------------
 function nav_url(string $trans, int $tid, int $book, int $ch): string {
-    return '?' . http_build_query([
-        'trans' => $trans,
-        'tid'   => $tid,
-        'book'  => $book,
-        'ch'    => $ch,
-    ]);
+    return BASE_PATH . strtolower($trans) . '/' . $tid . '/' . $book . '/' . $ch;
 }
 
 // ---------------------------------------------------------------------------
 // Request state
 // ---------------------------------------------------------------------------
 
+// Case-insensitive lookup so URLs like /kjv/… and /KJV/… both work
 $trans_key = $_GET['trans'] ?? 'KJV';
-if (!array_key_exists($trans_key, $TRANSLATIONS)) $trans_key = 'KJV';
+if (!array_key_exists($trans_key, $TRANSLATIONS)) {
+    $upper = strtoupper($trans_key);
+    $trans_key = array_key_exists($upper, $TRANSLATIONS) ? $upper : 'KJV';
+}
 $trans   = $TRANSLATIONS[$trans_key];
 $is_rtl  = $trans['rtl'];
 $is_kjv  = ($trans_key === 'KJV');
@@ -474,7 +476,7 @@ if (isset($_GET['ajax'])) {
     <!-- Translation picker -->
     <div class="sidebar-trans">
       <form method="get" id="trans-form">
-        <select name="trans" onchange="this.form.submit()" class="trans-select">
+        <select name="trans" onchange="switchTranslation(this.value)" class="trans-select">
           <?php foreach ($TRANSLATIONS as $key => $t): ?>
             <option value="<?= htmlspecialchars($key) ?>"<?= $key === $trans_key ? ' selected' : '' ?>>
               <?= htmlspecialchars($t['label']) ?>
@@ -593,6 +595,16 @@ if (isset($_GET['ajax'])) {
 </aside>
 
 <script>
+var BASE_PATH = <?= json_encode(BASE_PATH) ?>;
+
+// Translation switcher — navigate to a pretty URL preserving book/chapter
+function switchTranslation(trans) {
+  var tid  = document.getElementById('trans-tid').value;
+  var book = document.getElementById('trans-book').value;
+  var ch   = document.getElementById('trans-ch').value;
+  window.location = BASE_PATH + trans.toLowerCase() + '/' + tid + '/' + book + '/' + ch;
+}
+
 // ---------------------------------------------------------------------------
 // State — kept in sync after every AJAX navigation
 // ---------------------------------------------------------------------------

@@ -8,7 +8,48 @@
 // Configuration
 // ---------------------------------------------------------------------------
 
-$BIBLES_DIR = __DIR__ . '/../Bibles';
+$BIBLES_DIR = __DIR__ . '/Bibles';
+
+// ---------------------------------------------------------------------------
+// Canonical display names, ported from book_names.h
+// Falls back to the DB's LongName for unknown IDs.
+// ---------------------------------------------------------------------------
+function book_display_name(int $tid, int $book_id): ?string {
+    static $OT = [
+        1=>"Genesis",2=>"Exodus",3=>"Leviticus",4=>"Numbers",5=>"Deuteronomy",
+        6=>"Joshua",7=>"Judges",8=>"Ruth",9=>"1 Samuel",10=>"2 Samuel",
+        11=>"1 Kings",12=>"2 Kings",13=>"1 Chronicles",14=>"2 Chronicles",
+        15=>"Ezra",16=>"Nehemiah",17=>"Esther",18=>"Job",19=>"Psalms",
+        20=>"Proverbs",21=>"Ecclesiastes",22=>"Song of Solomon",23=>"Isaiah",
+        24=>"Jeremiah",25=>"Lamentations",26=>"Ezekiel",27=>"Daniel",
+        28=>"Hosea",29=>"Joel",30=>"Amos",31=>"Obadiah",32=>"Jonah",
+        33=>"Micah",34=>"Nahum",35=>"Habakkuk",36=>"Zephaniah",
+        37=>"Haggai",38=>"Zechariah",39=>"Malachi",
+    ];
+    static $NT = [
+        1=>"Matthew",2=>"Mark",3=>"Luke",4=>"John",5=>"Acts",
+        6=>"Romans",7=>"1 Corinthians",8=>"2 Corinthians",9=>"Galatians",
+        10=>"Ephesians",11=>"Philippians",12=>"Colossians",
+        13=>"1 Thessalonians",14=>"2 Thessalonians",15=>"1 Timothy",
+        16=>"2 Timothy",17=>"Titus",18=>"Philemon",19=>"Hebrews",
+        20=>"James",21=>"1 Peter",22=>"2 Peter",23=>"1 John",
+        24=>"2 John",25=>"3 John",26=>"Jude",27=>"Revelation",
+    ];
+    static $DC = [
+        1=>"Tobit",2=>"Judith",3=>"Additions to Esther",4=>"Wisdom",
+        5=>"Sirach",6=>"Baruch",7=>"Epistle of Jeremiah",8=>"Susanna",
+        9=>"Bel and the Dragon",10=>"1 Maccabees",11=>"2 Maccabees",
+        12=>"3 Maccabees",13=>"4 Maccabees",14=>"1 Esdras",15=>"2 Esdras",
+        16=>"Prayer of Manasseh",17=>"Prayer of Azariah",18=>"Odes",
+        19=>"Psalms of Solomon",20=>"Joshua (B Text)",21=>"Judges (B Text)",
+        22=>"Laodiceans",
+    ];
+    if ($tid === 1) return $OT[$book_id] ?? null;
+    if ($tid === 2) return $NT[$book_id] ?? null;
+    if ($tid === 3) return $DC[$book_id] ?? null;
+    return null;
+}
+
 
 $TRANSLATIONS = [
     'KJV'        => ['file' => 'KJV.db',        'label' => 'King James Version',    'rtl' => false, 'tids' => [1, 2]],
@@ -216,15 +257,18 @@ foreach ($books as $b) {
 
 // Resolve tid
 $avail_tids = $trans['tids'];
-$tid = isset($_GET['tid']) ? (int)$_GET['tid'] : $avail_tids[0];
-if (!in_array($tid, $avail_tids, true)) $tid = $avail_tids[0];
+// Default to NT (tid=2) when the translation has it and nothing is specified
+$default_tid = in_array(2, $avail_tids, true) ? 2 : $avail_tids[0];
+$tid = isset($_GET['tid']) ? (int)$_GET['tid'] : $default_tid;
+if (!in_array($tid, $avail_tids, true)) $tid = $default_tid;
 
 // Resolve book_id — default to first book in this tid
 $first_book = null;
 foreach ($books as $b) {
     if ((int)$b['TestamentID'] === $tid) { $first_book = $b; break; }
 }
-$book_id = isset($_GET['book']) ? (int)$_GET['book'] : ($first_book ? (int)$first_book['BookID'] : 1);
+$default_book = ($first_book ? (int)$first_book['BookID'] : 1);
+$book_id = isset($_GET['book']) ? (int)$_GET['book'] : $default_book;
 
 // Find current book record
 $current_book = null;
@@ -291,8 +335,125 @@ $verses = ($db_ok && $current_book) ? get_chapter($pdo, $tid, $book_id, $chapter
 $book_title  = $current_book ? htmlspecialchars($current_book['LongName']) : '';
 $page_title  = $book_title ? "$book_title $chapter" : 'Bible Reader';
 
+// ---------------------------------------------------------------------------
+// render_reader_html() — renders the inner content of <article.reader>.
+// Called for both full-page and AJAX responses.
+// ---------------------------------------------------------------------------
+function render_reader_html(
+    bool $db_ok, array $verses, string $book_title, int $chapter,
+    bool $is_kjv, bool $is_rtl, int $tid, int $book_id,
+    ?string $prev_url, ?string $next_url, array $trans
+): string {
+    ob_start();
+
+    if (!$db_ok):
+?>
+      <p class="error-msg">Could not open <strong><?= htmlspecialchars($trans['file']) ?></strong>.<br>
+         PDO SQLite: <code><?= extension_loaded('pdo_sqlite') ? 'loaded' : 'NOT loaded' ?></code></p>
+<?php
+    elseif (empty($verses)):
+?>
+      <p class="error-msg">No verses found for this chapter.</p>
+<?php
+    else:
+?>
+      <h1 class="chapter-heading">
+        <?= $book_title ?>
+        <span class="chapter-label">Chapter <?= $chapter ?></span>
+      </h1>
+
+      <?php
+        $in_para    = false;
+        $first_verse = true;
+        foreach ($verses as $v):
+          $vid  = $v['verse_id'];
+          $text = $v['text'];
+          $para = $v['paragraph_start'];
+
+          if ($para || $first_verse) {
+              if ($in_para) echo "</p>\n";
+              echo '<p class="verse-para">';
+              $in_para = true;
+          }
+
+          if ($is_kjv && $first_verse && $vid === 1 && $text !== '') {
+              preg_match('/^./us', $text, $m);
+              $dc_char = $m[0] ?? '';
+              $rest    = substr($text, strlen($dc_char));
+              echo '<span class="dropcap-wrap">';
+              echo '<span class="dropcap" title="Compare verse 1 across translations" '
+                  . 'onclick="loadParallel(' . $tid . ',' . $book_id . ',' . $chapter . ',' . $vid . ')">'
+                  . htmlspecialchars($dc_char) . '</span>';
+              echo htmlspecialchars($rest);
+              echo '</span>';
+          } else {
+              echo '<sup class="vnum" data-v="' . $vid . '" '
+                  . 'onclick="loadParallel(' . $tid . ',' . $book_id . ',' . $chapter . ',' . $vid . ')">'
+                  . $vid . '</sup>';
+              echo '<span class="vtext">' . htmlspecialchars($text) . '</span> ';
+          }
+
+          $first_verse = false;
+        endforeach;
+        if ($in_para) echo "</p>\n";
+      ?>
+
+<?php
+    endif;
+
+    if ($prev_url || $next_url):
+?>
+    <div class="bottom-nav">
+      <?php if ($prev_url): ?>
+        <a href="<?= $prev_url ?>" class="nav-btn-lg nav-ajax">&lsaquo; Previous</a>
+      <?php else: ?>
+        <span class="nav-btn-lg disabled"></span>
+      <?php endif; ?>
+      <?php if ($next_url): ?>
+        <a href="<?= $next_url ?>" class="nav-btn-lg nav-ajax">Next &rsaquo;</a>
+      <?php else: ?>
+        <span class="nav-btn-lg disabled"></span>
+      <?php endif; ?>
+    </div>
+<?php
+    endif;
+
+    return ob_get_clean();
+}
+
+// ---------------------------------------------------------------------------
+// AJAX endpoint — return JSON and exit before any HTML output
+// ---------------------------------------------------------------------------
+if (isset($_GET['ajax'])) {
+    header('Content-Type: application/json; charset=utf-8');
+    $reader_html = render_reader_html(
+        $db_ok, $verses, $book_title, $chapter,
+        $is_kjv, $is_rtl, $tid, $book_id,
+        $prev_url, $next_url, $trans
+    );
+    echo json_encode([
+        'reader_html'    => $reader_html,
+        'page_title'     => $page_title,
+        'toolbar_title'  => $book_title . ($current_book ? " \xe2\x80\x94 Ch. $chapter" : ''),
+        'prev_url'       => $prev_url,
+        'next_url'       => $next_url,
+        'tid'            => $tid,
+        'book_id'        => $book_id,
+        'chapter'        => $chapter,
+        'num_chapters'   => $num_chapters,
+        'trans'          => $trans_key,
+        'is_rtl'         => $is_rtl,
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 ?><!DOCTYPE html>
-<html lang="en" dir="<?= $is_rtl ? 'rtl' : 'ltr' ?>">
+<!--
+┏┳┏┓┏┓┳┳┏┓  ┏┓┓┏┳┓┳┏┓┏┳┓
+ ┃┣ ┗┓┃┃┗┓  ┃ ┣┫┣┫┃┗┓ ┃ 
+┗┛┗┛┗┛┗┛┗┛  ┗┛┛┗┛┗┻┗┛ ┻
+-->
+<html lang="en" dir="ltr">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -302,7 +463,7 @@ $page_title  = $book_title ? "$book_title $chapter" : 'Bible Reader';
 <link href="https://fonts.googleapis.com/css2?family=Pirata+One&family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=Crimson+Pro:wght@400;600&family=Roboto:wght@400;500&family=Noto+Serif+Hebrew:wght@400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
-<body class="<?= $is_rtl ? 'rtl' : 'ltr' ?>">
+<body>
 
 <!-- ================================================================ -->
 <!-- Sidebar                                                           -->
@@ -321,38 +482,39 @@ $page_title  = $book_title ? "$book_title $chapter" : 'Bible Reader';
           <?php endforeach; ?>
         </select>
         <!-- Preserve current position when switching translation -->
-        <input type="hidden" name="tid"  value="<?= $tid ?>">
-        <input type="hidden" name="book" value="<?= $book_id ?>">
-        <input type="hidden" name="ch"   value="<?= $chapter ?>">
+        <input type="hidden" name="tid"  id="trans-tid"  value="<?= $tid ?>">
+        <input type="hidden" name="book" id="trans-book" value="<?= $book_id ?>">
+        <input type="hidden" name="ch"   id="trans-ch"   value="<?= $chapter ?>">
       </form>
     </div>
 
-    <!-- Testament tabs (only when translation has multiple testaments) -->
-    <?php if (count($avail_tids) > 1): ?>
-    <div class="testament-tabs">
-      <?php foreach ($avail_tids as $t_id): ?>
-        <a class="tab<?= $t_id === $tid ? ' active' : '' ?>"
-           href="<?= nav_url($trans_key, $t_id, 0, 1) ?>">
-          <?= $t_id === 1 ? 'OT' : ($t_id === 2 ? 'NT' : 'Deut') ?>
-        </a>
-      <?php endforeach; ?>
-    </div>
-    <?php endif; ?>
-
-    <!-- Book list -->
+    <!-- Book list — collapsible testament sections -->
     <?php foreach ($books_by_tid as $group_tid => $group_books): ?>
       <?php if (!in_array($group_tid, $avail_tids, true)) continue; ?>
+      <?php
+        // Open the section that contains the currently-viewed book; collapse the rest.
+        $section_active = true; // all sections start expanded
+        $section_id = 'tgroup-' . $group_tid;
+        $label = $TID_LABELS[$group_tid] ?? 'Books';
+      ?>
       <?php if (count($avail_tids) > 1): ?>
-        <div class="sidebar-section-head"><?= $TID_LABELS[$group_tid] ?? '' ?></div>
+        <button class="sidebar-section-head collapsible<?= $section_active ? ' open' : '' ?>"
+                onclick="toggleSection('<?= $section_id ?>', this)"
+                aria-expanded="<?= $section_active ? 'true' : 'false' ?>">
+          <?= htmlspecialchars($label) ?>
+          <span class="collapse-arrow"><?= $section_active ? '&#9650;' : '&#9660;' ?></span>
+        </button>
       <?php endif; ?>
-      <ul class="book-list">
+      <ul class="book-list" id="<?= $section_id ?>"
+          <?= (count($avail_tids) > 1 && !$section_active) ? 'style="display:none"' : '' ?>>
         <?php foreach ($group_books as $b):
           $active = ((int)$b['TestamentID'] === $tid && (int)$b['BookID'] === $book_id);
           $url = nav_url($trans_key, (int)$b['TestamentID'], (int)$b['BookID'], 1);
         ?>
           <li>
-            <a href="<?= $url ?>" class="book-link<?= $active ? ' active' : '' ?>">
-              <?= htmlspecialchars($b['LongName']) ?>
+            <a href="<?= $url ?>" class="book-link nav-ajax<?= $active ? ' active' : '' ?>"
+               data-tid="<?= (int)$b['TestamentID'] ?>" data-book="<?= (int)$b['BookID'] ?>">
+              <?= htmlspecialchars(book_display_name((int)$b['TestamentID'], (int)$b['BookID']) ?? $b['LongName']) ?>
             </a>
           </li>
         <?php endforeach; ?>
@@ -372,34 +534,39 @@ $page_title  = $book_title ? "$book_title $chapter" : 'Bible Reader';
     <button class="sidebar-toggle" onclick="document.body.classList.toggle('sidebar-open')"
             title="Toggle sidebar" aria-label="Toggle sidebar">&#9776;</button>
 
-    <span class="toolbar-title">
+    <span class="toolbar-title" id="toolbar-title">
       <?= $book_title ?><?= $current_book ? " &mdash; Ch. $chapter" : '' ?>
     </span>
 
     <!-- Chapter navigation -->
     <nav class="chapter-nav" aria-label="Chapter navigation">
-      <?php if ($prev_url): ?>
-        <a href="<?= $prev_url ?>" class="nav-btn" title="Previous chapter">&#8249;</a>
-      <?php else: ?>
-        <span class="nav-btn disabled">&#8249;</span>
-      <?php endif; ?>
+      <a href="<?= $prev_url ?? '#' ?>" id="nav-prev"
+         class="nav-btn<?= $prev_url ? ' nav-ajax' : ' disabled' ?>" title="Previous chapter">&#8249;</a>
 
       <form method="get" class="chapter-jump" id="chapter-form">
         <input type="hidden" name="trans" value="<?= htmlspecialchars($trans_key) ?>">
-        <input type="hidden" name="tid"   value="<?= $tid ?>">
-        <input type="hidden" name="book"  value="<?= $book_id ?>">
-        <input type="number" name="ch" value="<?= $chapter ?>" min="1" max="<?= $num_chapters ?>"
-               class="ch-input" title="Chapter" aria-label="Chapter number"
-               onchange="this.form.submit()">
-        <span class="ch-of">/ <?= $num_chapters ?></span>
+        <input type="hidden" name="tid"   id="form-tid"  value="<?= $tid ?>">
+        <input type="hidden" name="book"  id="form-book" value="<?= $book_id ?>">
+        <input type="number" name="ch" id="ch-input" value="<?= $chapter ?>" min="1" max="<?= $num_chapters ?>"
+               class="ch-input" title="Chapter" aria-label="Chapter number">
+        <span class="ch-of">/ <span id="ch-max"><?= $num_chapters ?></span></span>
       </form>
 
-      <?php if ($next_url): ?>
-        <a href="<?= $next_url ?>" class="nav-btn" title="Next chapter">&#8250;</a>
-      <?php else: ?>
-        <span class="nav-btn disabled">&#8250;</span>
-      <?php endif; ?>
+      <a href="<?= $next_url ?? '#' ?>" id="nav-next"
+         class="nav-btn<?= $next_url ? ' nav-ajax' : ' disabled' ?>" title="Next chapter">&#8250;</a>
     </nav>
+
+    <!-- Font size -->
+    <div class="layout-toggle" title="Font size">
+      <button class="layout-btn" onclick="adjustFont(-1)" title="Decrease font size">A&#8315;</button>
+      <button class="layout-btn" onclick="adjustFont(1)"  title="Increase font size">A&#8314;</button>
+    </div>
+
+    <!-- Layout toggle -->
+    <div class="layout-toggle" title="Toggle column layout">
+      <button id="btn-single"  onclick="setLayout('single')"  class="layout-btn active">&#9646; Single</button>
+      <button id="btn-columns" onclick="setLayout('columns')" class="layout-btn">&#9646;&#9646; Columns</button>
+    </div>
 
     <!-- Parallel panel toggle -->
     <button class="parallel-toggle" id="parallel-toggle" onclick="toggleParallel()"
@@ -407,79 +574,8 @@ $page_title  = $book_title ? "$book_title $chapter" : 'Bible Reader';
   </header>
 
   <!-- Reader -->
-  <article class="reader" dir="<?= $is_rtl ? 'rtl' : 'ltr' ?>">
-
-    <?php if (!$db_ok): ?>
-      <p class="error-msg">Could not open <strong><?= htmlspecialchars($trans['file']) ?></strong>.
-         Make sure the database is present in the <code>Bibles/</code> folder.</p>
-
-    <?php elseif (empty($verses)): ?>
-      <p class="error-msg">No verses found for this chapter.</p>
-
-    <?php else: ?>
-      <!-- Chapter heading -->
-      <h1 class="chapter-heading">
-        <?= $book_title ?>
-        <span class="chapter-label">Chapter <?= $chapter ?></span>
-      </h1>
-
-      <!-- Verse body -->
-      <?php
-        $in_para = false;
-        $first_verse = true;
-        foreach ($verses as $v):
-          $vid  = $v['verse_id'];
-          $text = $v['text'];
-          $para = $v['paragraph_start'];
-
-          // Start new paragraph
-          if ($para || $first_verse) {
-              if ($in_para) echo "</p>\n";
-              echo '<p class="verse-para">';
-              $in_para = true;
-          }
-
-          // Dropcap for KJV verse 1
-          if ($is_kjv && $first_verse && $vid === 1 && $text !== '') {
-              // Extract first UTF-8 character
-              preg_match('/^./us', $text, $m);
-              $dc_char = $m[0] ?? '';
-              $rest    = mb_substr($text, mb_strlen($dc_char));
-              echo '<span class="dropcap-wrap">';
-              echo '<span class="dropcap">' . htmlspecialchars($dc_char) . '</span>';
-              echo '<sup class="vnum" data-v="' . $vid . '">' . $vid . '</sup>';
-              echo htmlspecialchars($rest);
-              echo '</span>';
-          } else {
-              echo '<sup class="vnum" data-v="' . $vid . '" '
-                  . 'onclick="loadParallel(' . $tid . ',' . $book_id . ',' . $chapter . ',' . $vid . ')">'
-                  . $vid . '</sup>';
-              echo '<span class="vtext">' . htmlspecialchars($text) . '</span> ';
-          }
-
-          $first_verse = false;
-        endforeach;
-
-        if ($in_para) echo "</p>\n";
-      ?>
-    <?php endif; ?>
-
-    <!-- Bottom navigation -->
-    <?php if ($prev_url || $next_url): ?>
-    <div class="bottom-nav">
-      <?php if ($prev_url): ?>
-        <a href="<?= $prev_url ?>" class="nav-btn-lg">&lsaquo; Previous</a>
-      <?php else: ?>
-        <span class="nav-btn-lg disabled"></span>
-      <?php endif; ?>
-      <?php if ($next_url): ?>
-        <a href="<?= $next_url ?>" class="nav-btn-lg">Next &rsaquo;</a>
-      <?php else: ?>
-        <span class="nav-btn-lg disabled"></span>
-      <?php endif; ?>
-    </div>
-    <?php endif; ?>
-
+  <article class="reader" id="reader" dir="<?= $is_rtl ? 'rtl' : 'ltr' ?>">
+    <?= render_reader_html($db_ok, $verses, $book_title, $chapter, $is_kjv, $is_rtl, $tid, $book_id, $prev_url, $next_url, $trans) ?>
   </article>
 </div>
 
@@ -498,6 +594,158 @@ $page_title  = $book_title ? "$book_title $chapter" : 'Bible Reader';
 
 <script>
 // ---------------------------------------------------------------------------
+// State — kept in sync after every AJAX navigation
+// ---------------------------------------------------------------------------
+var currentPrevUrl = <?= $prev_url ? json_encode($prev_url) : 'null' ?>;
+var currentNextUrl = <?= $next_url ? json_encode($next_url) : 'null' ?>;
+
+// ---------------------------------------------------------------------------
+// AJAX chapter loading
+// ---------------------------------------------------------------------------
+function loadChapter(url) {
+  var ajaxUrl = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'ajax=1';
+  fetch(ajaxUrl)
+    .then(function(r) { return r.json(); })
+    .then(function(d) { applyChapter(d, url); })
+    .catch(function() { window.location = url; }); // fallback: full reload
+}
+
+function applyChapter(d, url) {
+  // Reader content
+  var reader = document.getElementById('reader');
+  reader.innerHTML = d.reader_html;
+  reader.setAttribute('dir', d.is_rtl ? 'rtl' : 'ltr');
+
+  // Re-apply persisted font size and layout
+  applyFont(getSavedFont());
+  var layout = 'single';
+  try { layout = localStorage.getItem('br-layout') || 'single'; } catch(e) {}
+  reader.classList.toggle('columns', layout === 'columns');
+
+  // Toolbar title
+  document.getElementById('toolbar-title').textContent = d.toolbar_title;
+
+  // Toolbar nav buttons
+  updateNavBtn('nav-prev', d.prev_url);
+  updateNavBtn('nav-next', d.next_url);
+
+  // Chapter form
+  document.getElementById('form-tid').value  = d.tid;
+  document.getElementById('form-book').value = d.book_id;
+  // Translation form — keep position in sync so switching trans lands on the right book
+  document.getElementById('trans-tid').value  = d.tid;
+  document.getElementById('trans-book').value = d.book_id;
+  document.getElementById('trans-ch').value   = d.chapter;
+  var chInput = document.getElementById('ch-input');
+  chInput.value = d.chapter;
+  chInput.max   = d.num_chapters;
+  document.getElementById('ch-max').textContent = d.num_chapters;
+
+  // Sidebar active book
+  document.querySelectorAll('.book-link').forEach(function(a) {
+    var active = parseInt(a.dataset.tid)  === d.tid &&
+                 parseInt(a.dataset.book) === d.book_id;
+    a.classList.toggle('active', active);
+  });
+
+  // Browser history + page title
+  currentPrevUrl = d.prev_url;
+  currentNextUrl = d.next_url;
+  document.title = d.page_title;
+  history.pushState({ url: url }, d.page_title, url);
+
+  // Scroll reader to top
+  reader.scrollTop = 0;
+  window.scrollTo(0, 0);
+}
+
+function updateNavBtn(id, url) {
+  var btn = document.getElementById(id);
+  if (!btn) return;
+  if (url) {
+    btn.href = url;
+    btn.classList.remove('disabled');
+    btn.classList.add('nav-ajax');
+  } else {
+    btn.removeAttribute('href');
+    btn.classList.add('disabled');
+    btn.classList.remove('nav-ajax');
+  }
+}
+
+// Intercept all .nav-ajax link clicks
+document.addEventListener('click', function(e) {
+  var link = e.target.closest('a.nav-ajax');
+  if (!link) return;
+  var href = link.getAttribute('href');
+  if (!href || href === '#') return;
+  e.preventDefault();
+  loadChapter(href);
+  // Close sidebar on mobile after picking a book
+  if (window.innerWidth < 768) document.body.classList.remove('sidebar-open');
+});
+
+// Chapter form — intercept submit and ch-input changes
+document.getElementById('chapter-form').addEventListener('submit', function(e) {
+  e.preventDefault();
+  var params = new URLSearchParams(new FormData(this));
+  loadChapter('?' + params.toString());
+});
+document.getElementById('ch-input').addEventListener('change', function() {
+  document.getElementById('chapter-form').dispatchEvent(new Event('submit'));
+});
+
+// Browser back/forward
+window.addEventListener('popstate', function(e) {
+  var url = (e.state && e.state.url) ? e.state.url : window.location.search;
+  loadChapter(url);
+});
+
+// ---------------------------------------------------------------------------
+// Font size — persisted in localStorage
+// ---------------------------------------------------------------------------
+var FONT_MIN = 14, FONT_MAX = 28;
+function getSavedFont() {
+  try { return parseInt(localStorage.getItem('br-fontsize')) || 18; } catch(e) { return 18; }
+}
+function applyFont(size) {
+  document.getElementById('reader').style.fontSize = size + 'px';
+}
+function adjustFont(delta) {
+  var next = Math.min(FONT_MAX, Math.max(FONT_MIN, getSavedFont() + delta));
+  applyFont(next);
+  try { localStorage.setItem('br-fontsize', next); } catch(e) {}
+}
+applyFont(getSavedFont());
+
+// ---------------------------------------------------------------------------
+// Layout toggle (single / columns) — persisted in localStorage
+// ---------------------------------------------------------------------------
+function setLayout(mode) {
+  document.getElementById('reader').classList.toggle('columns', mode === 'columns');
+  document.getElementById('btn-single').classList.toggle('active',  mode === 'single');
+  document.getElementById('btn-columns').classList.toggle('active', mode === 'columns');
+  try { localStorage.setItem('br-layout', mode); } catch(e) {}
+}
+(function() {
+  var saved = 'single';
+  try { saved = localStorage.getItem('br-layout') || 'single'; } catch(e) {}
+  if (saved === 'columns') setLayout('columns');
+})();
+
+// ---------------------------------------------------------------------------
+// Testament section collapse/expand
+// ---------------------------------------------------------------------------
+function toggleSection(id, btn) {
+  var ul   = document.getElementById(id);
+  var open = ul.style.display !== 'none';
+  ul.style.display = open ? 'none' : '';
+  btn.classList.toggle('open', !open);
+  btn.setAttribute('aria-expanded', String(!open));
+  btn.querySelector('.collapse-arrow').innerHTML = open ? '&#9660;' : '&#9650;';
+}
+
+// ---------------------------------------------------------------------------
 // Sidebar overlay on small screens
 // ---------------------------------------------------------------------------
 document.addEventListener('click', function(e) {
@@ -514,9 +762,7 @@ document.addEventListener('click', function(e) {
 // ---------------------------------------------------------------------------
 var parallelOpen = false;
 
-function toggleParallel() {
-  parallelOpen ? closeParallel() : openParallel();
-}
+function toggleParallel() { parallelOpen ? closeParallel() : openParallel(); }
 
 function openParallel() {
   parallelOpen = true;
@@ -537,8 +783,7 @@ function loadParallel(tid, book, chapter, verse) {
   title.textContent = 'Verse ' + chapter + ':' + verse;
   body.innerHTML    = '<p class="loading">Loading\u2026</p>';
 
-  var url = 'api.php?tid=' + tid + '&book=' + book + '&ch=' + chapter + '&verse=' + verse;
-  fetch(url)
+  fetch('api.php?tid=' + tid + '&book=' + book + '&ch=' + chapter + '&verse=' + verse)
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.error) { body.innerHTML = '<p class="error-msg">' + data.error + '</p>'; return; }
@@ -546,7 +791,7 @@ function loadParallel(tid, book, chapter, verse) {
       for (var i = 0; i < data.length; i++) {
         var item = data[i];
         html += '<div class="parallel-entry' + (item.rtl ? ' rtl' : '') + '">';
-        html += '<div class="parallel-trans">' + escHtml(item.translation) + '</div>';
+        html += '<div class="parallel-trans">' + escHtml(item.label) + '</div>';
         if (item.text) {
           html += '<div class="parallel-text" dir="' + (item.rtl ? 'rtl' : 'ltr') + '">'
                + escHtml(item.text) + '</div>';
@@ -557,28 +802,23 @@ function loadParallel(tid, book, chapter, verse) {
       }
       body.innerHTML = html;
     })
-    .catch(function(e) {
-      body.innerHTML = '<p class="error-msg">Failed to load verse data.</p>';
-    });
+    .catch(function() { body.innerHTML = '<p class="error-msg">Failed to load.</p>'; });
 }
 
 function escHtml(s) {
-  return String(s)
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                  .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
+// ---------------------------------------------------------------------------
 // Keyboard shortcuts
+// ---------------------------------------------------------------------------
 document.addEventListener('keydown', function(e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-    <?php if ($prev_url): ?>
-    window.location = '<?= $prev_url ?>';
-    <?php endif; ?>
+    if (currentPrevUrl) loadChapter(currentPrevUrl);
   } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-    <?php if ($next_url): ?>
-    window.location = '<?= $next_url ?>';
-    <?php endif; ?>
+    if (currentNextUrl) loadChapter(currentNextUrl);
   } else if (e.key === 'Escape') {
     closeParallel();
   }

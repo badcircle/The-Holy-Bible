@@ -7,7 +7,7 @@
 //   [{ translation, label, text, rtl }, ...]
 // ============================================================
 
-$BIBLES_DIR = __DIR__ . '/../Bibles';
+$BIBLES_DIR = __DIR__ . '/Bibles';
 
 $TRANSLATIONS = [
     'KJV'        => ['file' => 'KJV.db',        'label' => 'King James Version',  'rtl' => false, 'tids' => [1, 2]],

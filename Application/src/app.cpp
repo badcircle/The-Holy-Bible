@@ -186,6 +186,12 @@ void app_switch_translation(AppState* app, int idx) {
     if (idx < 0 || idx >= (int)app->translations.size()) return;
     if (idx == app->current_translation) return;
 
+    // Remember position so we can return to the same book/chapter if it exists
+    int  saved_testament = app->current_testament_id;
+    int  saved_book      = app->current_book_id;
+    int  saved_chapter   = app->current_chapter;
+    bool was_cover       = app->show_cover;
+
     BibleDB* next = open_translation_db(app->translations[idx]);
     if (!next) return; // leave current db intact if open fails
 
@@ -202,8 +208,26 @@ void app_switch_translation(AppState* app, int idx) {
         app->show_cover = true;
     } else {
         app->show_cover = false;
-        if (!app->books.empty())
-            app_open_book(app, app->books[0].testament_id, app->books[0].book_id);
+        if (!app->books.empty()) {
+            // Try to stay at the same book/chapter if it exists in the new translation
+            bool found = false;
+            if (!was_cover) {
+                for (auto& b : app->books) {
+                    if (b.testament_id == saved_testament && b.book_id == saved_book) {
+                        int first = bible_db_get_first_chapter(app->db, saved_testament, saved_book);
+                        int num   = bible_db_get_num_chapters(app->db, saved_testament, saved_book);
+                        int ch    = saved_chapter;
+                        if (ch < first) ch = first;
+                        if (num > 0 && ch > num) ch = num;
+                        app_load_chapter(app, saved_testament, saved_book, ch);
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if (!found)
+                app_open_book(app, app->books[0].testament_id, app->books[0].book_id);
+        }
     }
 }
 
@@ -310,37 +334,6 @@ static void render_sidebar(AppState* app) {
     // More breathing room between items
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,   {8.0f, 5.0f});
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,  {6.0f, 4.0f});
-
-    // Translation selector
-    if (app->translations.size() > 1) {
-        ImGui::SetCursorPosX(8.0f);
-        ImGui::PushItemWidth(app->sidebar_width - 16.0f);
-        ImGui::PushStyleColor(ImGuiCol_FrameBg,        ImVec4{0.20f, 0.18f, 0.16f, 1.0f});
-        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4{0.28f, 0.25f, 0.20f, 1.0f});
-        ImGui::PushStyleColor(ImGuiCol_FrameBgActive,  ImVec4{0.25f, 0.22f, 0.18f, 1.0f});
-        ImGui::PushStyleColor(ImGuiCol_PopupBg,        ImVec4{0.15f, 0.14f, 0.12f, 1.0f});
-        ImGui::PushStyleColor(ImGuiCol_Text,           COL_TEXT_BODY);
-
-        const char* cur_name = app->translations[app->current_translation].name;
-        if (ImGui::BeginCombo("##trans", cur_name, ImGuiComboFlags_HeightRegular)) {
-            for (int i = 0; i < (int)app->translations.size(); ++i) {
-                bool sel = (i == app->current_translation);
-                ImGui::PushStyleColor(ImGuiCol_Text, sel ? COL_HEADER : COL_TEXT_BODY);
-                if (ImGui::Selectable(app->translations[i].name, sel))
-                    app_switch_translation(app, i);
-                ImGui::PopStyleColor();
-                if (sel) ImGui::SetItemDefaultFocus();
-            }
-            ImGui::EndCombo();
-        }
-
-        ImGui::PopStyleColor(5);
-        ImGui::PopItemWidth();
-        ImGui::Spacing();
-        ImGui::SetCursorPosX(8.0f);
-        ImGui::Separator();
-        ImGui::Spacing();
-    }
 
     int current_testament = 0;
     for (auto& book : app->books) {
@@ -1287,6 +1280,31 @@ static void render_toolbar(AppState* app) {
 
         ImGui::SameLine(0, 6);
         if (ImGui::ArrowButton("##next", ImGuiDir_Right)) app_go_next_chapter(app);
+
+        // Translation dropdown — right of chapter nav
+        if (app->translations.size() > 1) {
+            ImGui::SameLine(nav_x + nav_w + 16.0f);
+            ImGui::PushItemWidth(150.0f);
+            ImGui::PushStyleColor(ImGuiCol_FrameBg,        ImVec4{0.20f, 0.18f, 0.16f, 1.0f});
+            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4{0.28f, 0.25f, 0.20f, 1.0f});
+            ImGui::PushStyleColor(ImGuiCol_FrameBgActive,  ImVec4{0.25f, 0.22f, 0.18f, 1.0f});
+            ImGui::PushStyleColor(ImGuiCol_PopupBg,        ImVec4{0.15f, 0.14f, 0.12f, 1.0f});
+            ImGui::PushStyleColor(ImGuiCol_Text,           COL_TEXT_BODY);
+            const char* cur_name = app->translations[app->current_translation].name;
+            if (ImGui::BeginCombo("##trans", cur_name, ImGuiComboFlags_HeightRegular)) {
+                for (int i = 0; i < (int)app->translations.size(); ++i) {
+                    bool sel = (i == app->current_translation);
+                    ImGui::PushStyleColor(ImGuiCol_Text, sel ? COL_HEADER : COL_TEXT_BODY);
+                    if (ImGui::Selectable(app->translations[i].name, sel))
+                        app_switch_translation(app, i);
+                    ImGui::PopStyleColor();
+                    if (sel) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::PopStyleColor(5);
+            ImGui::PopItemWidth();
+        }
     }
 
     // Shared font-size helper — clamps and sets rebuild flag
@@ -1344,8 +1362,8 @@ static void render_toolbar(AppState* app) {
     if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, false)) app_go_next_chapter(app);
     if (ImGui::IsKeyPressed(ImGuiKey_PageUp,     false)) app_go_prev_chapter(app);
     if (ImGui::IsKeyPressed(ImGuiKey_PageDown,   false)) app_go_next_chapter(app);
-    if (ImGui::IsKeyPressed(ImGuiKey_Tab,        false)) app->sidebar_visible = !app->sidebar_visible;
-    if (ImGui::IsKeyPressed(ImGuiKey_Backslash,  false)) app->tray_open = !app->tray_open;
+    if (ImGui::IsKeyPressed(ImGuiKey_F2,   false)) app->sidebar_visible = !app->sidebar_visible;
+    if (ImGui::IsKeyPressed(ImGuiKey_Tab,  false)) app->tray_open = !app->tray_open;
     if (ImGui::IsKeyPressed(ImGuiKey_F11,        false)) app->request_fullscreen_toggle = true;
     // Ctrl +/- / 0 and Keypad +/- — adjust text size
     {
@@ -1440,8 +1458,8 @@ static void render_shortcuts_popup(AppState* app) {
     row("Up / Down",         "Scroll");
 
     section("VIEW");
-    row("Tab",               "Toggle book sidebar");
-    row("\\",                "Toggle parallel-verse tray");
+    row("F2",                "Toggle book sidebar");
+    row("Tab",               "Toggle parallel-verse tray");
     row("F11",               "Toggle fullscreen");
 
     section("TEXT SIZE");

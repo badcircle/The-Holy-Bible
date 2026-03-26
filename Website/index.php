@@ -866,9 +866,9 @@ function escHtml(s) {
 // ---------------------------------------------------------------------------
 document.addEventListener('keydown', function(e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+  if (e.key === 'ArrowLeft') {
     if (currentPrevUrl) loadChapter(currentPrevUrl);
-  } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+  } else if (e.key === 'ArrowRight') {
     if (currentNextUrl) loadChapter(currentNextUrl);
   } else if (e.key === 'Escape') {
     closeParallel();

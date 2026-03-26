@@ -2,6 +2,7 @@
 #include "imgui.h"
 #include "book_names.h"
 #include <cstdio>
+#include <algorithm>
 
 // stb_image — single-header image loader
 #define STB_IMAGE_IMPLEMENTATION
@@ -23,6 +24,72 @@ static constexpr ImVec4 COL_TEXT_DIM     = {0.55f, 0.52f, 0.45f, 1.0f};
 static constexpr ImVec4 COL_VERSE_NUM    = {0.72f, 0.58f, 0.32f, 1.0f}; // warm gold
 static constexpr ImVec4 COL_HEADER      = {0.85f, 0.75f, 0.55f, 1.0f}; // book/chapter title
 static constexpr ImVec4 COL_SELECTED    = {0.30f, 0.25f, 0.15f, 1.0f}; // sidebar selection
+
+// ---------------------------------------------------------------------------
+// RTL text reversal (Hebrew / Tanakh)
+//
+// ImGui has no BiDi support — it always renders glyphs left-to-right.
+// Hebrew Unicode text is stored in logical order (reading order = right-to-left),
+// so the first codepoint ends up on the LEFT, which is visually backwards.
+//
+// Solution: reverse the string at the grapheme-cluster level so that the first
+// reading character ends up last (rightmost) after LTR rendering.  Combining
+// marks (niqqud, cantillation) stay attached to their base character.
+// ---------------------------------------------------------------------------
+
+static uint32_t rtl_decode_utf8(const char*& p) {
+    auto b = [](const char* q, int i) { return (unsigned char)q[i]; };
+    unsigned char c = b(p, 0);
+    uint32_t cp; int n;
+    if      (c < 0x80) { cp = c;        n = 1; }
+    else if (c < 0xC0) { cp = 0xFFFD;   n = 1; }   // stray continuation
+    else if (c < 0xE0) { cp = c & 0x1F; n = 2; }
+    else if (c < 0xF0) { cp = c & 0x0F; n = 3; }
+    else               { cp = c & 0x07; n = 4; }
+    for (int i = 1; i < n && p[i]; ++i) cp = (cp << 6) | (b(p, i) & 0x3F);
+    p += n;
+    return cp;
+}
+
+static void rtl_encode_utf8(std::string& out, uint32_t cp) {
+    if      (cp < 0x80)    { out += (char)cp; }
+    else if (cp < 0x800)   { out += (char)(0xC0|(cp>>6));  out += (char)(0x80|(cp&0x3F)); }
+    else if (cp < 0x10000) { out += (char)(0xE0|(cp>>12)); out += (char)(0x80|((cp>>6)&0x3F)); out += (char)(0x80|(cp&0x3F)); }
+    else                   { out += (char)(0xF0|(cp>>18)); out += (char)(0x80|((cp>>12)&0x3F)); out += (char)(0x80|((cp>>6)&0x3F)); out += (char)(0x80|(cp&0x3F)); }
+}
+
+static bool rtl_is_combining(uint32_t cp) {
+    // Hebrew cantillation (0591-05AF) and niqqud/vowel points (05B0-05C7),
+    // excluding standalone punctuation: maqaf(05BE), paseq(05C0), sof-pasuq(05C3), nun-hafukha(05C6)
+    if (cp >= 0x0591 && cp <= 0x05C7)
+        return cp != 0x05BE && cp != 0x05C0 && cp != 0x05C3 && cp != 0x05C6;
+    return false;
+}
+
+// Reverse a UTF-8 Hebrew string for correct visual display in a LTR renderer.
+static std::string rtl_reverse(const char* text) {
+    // Decode into clusters: [base_cp, combining_cp, combining_cp, ...]
+    struct Cluster { uint32_t cps[8]; int n = 0; };
+    std::vector<Cluster> clusters;
+    const char* p = text;
+    while (*p) {
+        uint32_t cp = rtl_decode_utf8(p);
+        if (rtl_is_combining(cp) && !clusters.empty()) {
+            auto& cl = clusters.back();
+            if (cl.n < 8) cl.cps[cl.n++] = cp;
+        } else {
+            Cluster cl; cl.cps[0] = cp; cl.n = 1;
+            clusters.push_back(cl);
+        }
+    }
+    std::reverse(clusters.begin(), clusters.end());
+    std::string out;
+    out.reserve(strlen(text));
+    for (auto& cl : clusters)
+        for (int i = 0; i < cl.n; ++i)
+            rtl_encode_utf8(out, cl.cps[i]);
+    return out;
+}
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -204,29 +271,32 @@ void app_switch_translation(AppState* app, int idx) {
     app->books.resize(n);
 
     app->verses.clear();
-    if (translation_has_cover(app)) {
-        app->show_cover = true;
-    } else {
-        app->show_cover = false;
-        if (!app->books.empty()) {
-            // Try to stay at the same book/chapter if it exists in the new translation
-            bool found = false;
-            if (!was_cover) {
-                for (auto& b : app->books) {
-                    if (b.testament_id == saved_testament && b.book_id == saved_book) {
-                        int first = bible_db_get_first_chapter(app->db, saved_testament, saved_book);
-                        int num   = bible_db_get_num_chapters(app->db, saved_testament, saved_book);
-                        int ch    = saved_chapter;
-                        if (ch < first) ch = first;
-                        if (num > 0 && ch > num) ch = num;
-                        app_load_chapter(app, saved_testament, saved_book, ch);
-                        found = true;
-                        break;
-                    }
-                }
+
+    // Try to stay at the same book/chapter if we weren't on the cover
+    bool found = false;
+    if (!was_cover && !app->books.empty()) {
+        for (auto& b : app->books) {
+            if (b.testament_id == saved_testament && b.book_id == saved_book) {
+                int first = bible_db_get_first_chapter(app->db, saved_testament, saved_book);
+                int num   = bible_db_get_num_chapters(app->db, saved_testament, saved_book);
+                int ch    = saved_chapter;
+                if (ch < first) ch = first;
+                if (num > 0 && ch > num) ch = num;
+                app->show_cover = false;
+                app_load_chapter(app, saved_testament, saved_book, ch);
+                found = true;
+                break;
             }
-            if (!found)
-                app_open_book(app, app->books[0].testament_id, app->books[0].book_id);
+        }
+    }
+
+    if (!found) {
+        // Fallback: show cover if this translation has one, otherwise open book 1
+        if (translation_has_cover(app)) {
+            app->show_cover = true;
+        } else if (!app->books.empty()) {
+            app->show_cover = false;
+            app_open_book(app, app->books[0].testament_id, app->books[0].book_id);
         }
     }
 }
@@ -1030,15 +1100,56 @@ static void render_reader(AppState* app) {
 
             // Verse text
             if (rtl) {
-                // Manual word-wrap with per-line right-alignment (ImGui has no BiDi support)
+                // Hebrew word-wrap for LTR renderers (ImGui has no BiDi support):
+                //   1. Split original logical-order text into words.
+                //   2. Word-wrap in logical order so line breaks fall naturally.
+                //   3. For each line, reverse the word order AND reverse chars within
+                //      each word — this gives correct visual (right-to-left) output.
+                //   Result: verse beginning on line 1 (right side), colon on last line (left).
                 float wrap_width = text_wrap - text_x;
-                const char* p = v.text;
-                std::string cur_line;
-                float cur_w = 0.0f;
-                bool first_line = true;
+                float space_w    = ImGui::CalcTextSize(" ").x;
 
-                auto flush_rtl_line = [&](const std::string& line) {
-                    float lw = ImGui::CalcTextSize(line.c_str()).x;
+                // Step 1 – collect words in logical order
+                std::vector<std::string> words;
+                for (const char* p = v.text; *p; ) {
+                    while (*p == ' ') p++;
+                    if (!*p) break;
+                    const char* ws = p;
+                    while (*p && *p != ' ') p++;
+                    words.emplace_back(ws, p);
+                }
+
+                // Step 2 – find line break indices
+                std::vector<int> line_start;
+                line_start.push_back(0);
+                float cur_w = 0.0f;
+                for (int wi = 0; wi < (int)words.size(); ++wi) {
+                    float ww = ImGui::CalcTextSize(words[wi].c_str()).x;
+                    if (wi == line_start.back()) {
+                        cur_w = ww;
+                    } else if (cur_w + space_w + ww > wrap_width) {
+                        line_start.push_back(wi);
+                        cur_w = ww;
+                    } else {
+                        cur_w += space_w + ww;
+                    }
+                }
+
+                // Step 3 – render each line reversed, right-aligned
+                bool first_line = true;
+                for (int li = 0; li < (int)line_start.size(); ++li) {
+                    int from_w = line_start[li];
+                    int to_w   = (li + 1 < (int)line_start.size())
+                                 ? line_start[li + 1] : (int)words.size();
+
+                    // Build display string: words in reverse order, chars reversed per word
+                    std::string line_text;
+                    for (int wi = to_w - 1; wi >= from_w; --wi) {
+                        if (!line_text.empty()) line_text += ' ';
+                        line_text += rtl_reverse(words[wi].c_str());
+                    }
+
+                    float lw = ImGui::CalcTextSize(line_text.c_str()).x;
                     float lx = text_wrap - lw;
                     if (lx < text_x) lx = text_x;
                     if (first_line) {
@@ -1047,28 +1158,8 @@ static void render_reader(AppState* app) {
                     } else {
                         ImGui::SetCursorPosX(lx);
                     }
-                    ImGui::TextUnformatted(line.c_str());
-                };
-
-                while (*p) {
-                    while (*p == ' ') p++;
-                    if (!*p) break;
-                    const char* ws = p;
-                    while (*p && *p != ' ') p++;
-                    std::string word(ws, p);
-                    float ww = ImGui::CalcTextSize(word.c_str()).x;
-                    float sw = cur_line.empty() ? 0.0f : ImGui::CalcTextSize(" ").x;
-                    if (!cur_line.empty() && cur_w + sw + ww > wrap_width) {
-                        flush_rtl_line(cur_line);
-                        cur_line = word;
-                        cur_w = ww;
-                    } else {
-                        if (!cur_line.empty()) { cur_line += ' '; cur_w += sw; }
-                        cur_line += word;
-                        cur_w += ww;
-                    }
+                    ImGui::TextUnformatted(line_text.c_str());
                 }
-                if (!cur_line.empty()) flush_rtl_line(cur_line);
             } else {
                 ImGui::SameLine();
                 ImGui::SetCursorPosX(text_x);
@@ -1204,6 +1295,13 @@ static void render_toolbar(AppState* app) {
     ImGui::PopStyleColor(3);
     ImGui::SameLine(0, 12);
 
+    // Pre-compute nav geometry so both branches can use it (e.g. for dropdown placement)
+    float nav_frame_h  = ImGui::GetFrameHeight();
+    float nav_ch_btn_w = ImGui::CalcTextSize("Ch 999 / 999").x
+                       + ImGui::GetStyle().FramePadding.x * 2.0f;
+    float nav_w = nav_frame_h + 6.0f + nav_ch_btn_w + 6.0f + nav_frame_h;
+    float nav_x = (ImGui::GetWindowWidth() - nav_w) * 0.5f;
+
     if (app->show_cover) {
         // Cover is showing — display a dim title, no chapter navigation
         ImGui::PushStyleColor(ImGuiCol_Text, COL_TEXT_DIM);
@@ -1212,11 +1310,8 @@ static void render_toolbar(AppState* app) {
     } else {
         // Chapter nav — centred in the toolbar
         const Book* book = find_book(app, app->current_testament_id, app->current_book_id);
-        float frame_h  = ImGui::GetFrameHeight();
-        float ch_btn_w = ImGui::CalcTextSize("Ch 999 / 999").x
-                       + ImGui::GetStyle().FramePadding.x * 2.0f;
-        float nav_w    = frame_h + 6.0f + ch_btn_w + 6.0f + frame_h;
-        float nav_x    = (ImGui::GetWindowWidth() - nav_w) * 0.5f;
+        float frame_h  = nav_frame_h;
+        float ch_btn_w = nav_ch_btn_w;
 
         // Book name — clipped to the space left of the nav
         float title_x = ImGui::GetCursorPosX();
@@ -1281,30 +1376,31 @@ static void render_toolbar(AppState* app) {
         ImGui::SameLine(0, 6);
         if (ImGui::ArrowButton("##next", ImGuiDir_Right)) app_go_next_chapter(app);
 
-        // Translation dropdown — right of chapter nav
-        if (app->translations.size() > 1) {
-            ImGui::SameLine(nav_x + nav_w + 16.0f);
-            ImGui::PushItemWidth(150.0f);
-            ImGui::PushStyleColor(ImGuiCol_FrameBg,        ImVec4{0.20f, 0.18f, 0.16f, 1.0f});
-            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4{0.28f, 0.25f, 0.20f, 1.0f});
-            ImGui::PushStyleColor(ImGuiCol_FrameBgActive,  ImVec4{0.25f, 0.22f, 0.18f, 1.0f});
-            ImGui::PushStyleColor(ImGuiCol_PopupBg,        ImVec4{0.15f, 0.14f, 0.12f, 1.0f});
-            ImGui::PushStyleColor(ImGuiCol_Text,           COL_TEXT_BODY);
-            const char* cur_name = app->translations[app->current_translation].name;
-            if (ImGui::BeginCombo("##trans", cur_name, ImGuiComboFlags_HeightRegular)) {
-                for (int i = 0; i < (int)app->translations.size(); ++i) {
-                    bool sel = (i == app->current_translation);
-                    ImGui::PushStyleColor(ImGuiCol_Text, sel ? COL_HEADER : COL_TEXT_BODY);
-                    if (ImGui::Selectable(app->translations[i].name, sel))
-                        app_switch_translation(app, i);
-                    ImGui::PopStyleColor();
-                    if (sel) ImGui::SetItemDefaultFocus();
-                }
-                ImGui::EndCombo();
+    }
+
+    // Translation dropdown — right of chapter nav, visible in all toolbar states
+    if (app->translations.size() > 1) {
+        ImGui::SameLine(nav_x + nav_w + 16.0f);
+        ImGui::PushItemWidth(150.0f);
+        ImGui::PushStyleColor(ImGuiCol_FrameBg,        ImVec4{0.20f, 0.18f, 0.16f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4{0.28f, 0.25f, 0.20f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_FrameBgActive,  ImVec4{0.25f, 0.22f, 0.18f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_PopupBg,        ImVec4{0.15f, 0.14f, 0.12f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_Text,           COL_TEXT_BODY);
+        const char* cur_name = app->translations[app->current_translation].name;
+        if (ImGui::BeginCombo("##trans", cur_name, ImGuiComboFlags_HeightRegular)) {
+            for (int i = 0; i < (int)app->translations.size(); ++i) {
+                bool sel = (i == app->current_translation);
+                ImGui::PushStyleColor(ImGuiCol_Text, sel ? COL_HEADER : COL_TEXT_BODY);
+                if (ImGui::Selectable(app->translations[i].name, sel))
+                    app_switch_translation(app, i);
+                ImGui::PopStyleColor();
+                if (sel) ImGui::SetItemDefaultFocus();
             }
-            ImGui::PopStyleColor(5);
-            ImGui::PopItemWidth();
+            ImGui::EndCombo();
         }
+        ImGui::PopStyleColor(5);
+        ImGui::PopItemWidth();
     }
 
     // Shared font-size helper — clamps and sets rebuild flag

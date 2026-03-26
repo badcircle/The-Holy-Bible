@@ -66,8 +66,9 @@ struct AppState {
     bool   rtl_layout           = false; // when true, right-to-left text (Hebrew etc.)
 
     // Popup requests (set anywhere, consumed by render_reader / render_context_popup)
-    bool   request_context_popup = false;
-    bool   close_context_popup   = false;
+    bool   request_context_popup  = false;
+    bool   close_context_popup    = false;
+    bool   request_shortcuts_popup = false;
 
     // Parallel-verse tray (slides in from the right)
     bool   tray_open      = false;

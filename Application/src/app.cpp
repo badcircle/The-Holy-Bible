@@ -1359,10 +1359,9 @@ static void render_toolbar(AppState* app) {
         if (ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract, false)) set_font_size(app->font_size - 2.0f);
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
-            !ImGui::IsPopupOpen("##shortcuts") &&
             !ImGui::IsPopupOpen("##bctx") &&
             !ImGui::IsPopupOpen("##chpicker"))
-        ImGui::OpenPopup("##shortcuts");
+        app->request_shortcuts_popup = true;
 
     if (app->fonts.ui) ImGui::PopFont();
 
@@ -1503,6 +1502,11 @@ void app_render(AppState* app) {
     // so it always draws on top without any z-order tricks.
     render_tray(app);
 
+    if (app->request_shortcuts_popup) {
+        app->request_shortcuts_popup = false;
+        if (!ImGui::IsPopupOpen("##shortcuts"))
+            ImGui::OpenPopup("##shortcuts");
+    }
     render_shortcuts_popup(app);
 
     ImGui::End();

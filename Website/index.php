@@ -561,21 +561,44 @@ if (isset($_GET['ajax'])) {
          class="nav-btn<?= $next_url ? ' nav-ajax' : ' disabled' ?>" title="Next chapter">&#8250;</a>
     </nav>
 
-    <!-- Font size -->
-    <div class="layout-toggle" title="Font size">
-      <button class="layout-btn" onclick="adjustFont(-1)" title="Decrease font size">A&#8315;</button>
-      <button class="layout-btn" onclick="adjustFont(1)"  title="Increase font size">A&#8314;</button>
+    <!-- Desktop: inline controls -->
+    <div class="inline-controls">
+      <div class="layout-toggle" title="Font size">
+        <button class="layout-btn" onclick="adjustFont(-1)" title="Decrease font size">A&#8315;</button>
+        <button class="layout-btn" onclick="adjustFont(1)"  title="Increase font size">A&#8314;</button>
+      </div>
+      <div class="layout-toggle" title="Toggle column layout">
+        <button id="btn-single"  onclick="setLayout('single')"  class="layout-btn active">&#9646; Single</button>
+        <button id="btn-columns" onclick="setLayout('columns')" class="layout-btn">&#9646;&#9646; Columns</button>
+      </div>
+      <button class="parallel-toggle" id="parallel-toggle" onclick="toggleParallel()"
+              title="Compare verses across translations">&#9783; Compare</button>
     </div>
 
-    <!-- Layout toggle -->
-    <div class="layout-toggle" title="Toggle column layout">
-      <button id="btn-single"  onclick="setLayout('single')"  class="layout-btn active">&#9646; Single</button>
-      <button id="btn-columns" onclick="setLayout('columns')" class="layout-btn">&#9646;&#9646; Columns</button>
+    <!-- Mobile: overflow menu -->
+    <div class="overflow-wrap" id="overflow-wrap">
+      <button class="overflow-btn" onclick="toggleOverflow()" title="Options">&#8943;</button>
+      <div class="overflow-menu" id="overflow-menu">
+        <div class="overflow-row">
+          <span class="overflow-label">Font</span>
+          <div class="layout-toggle">
+            <button class="layout-btn" onclick="adjustFont(-1)">A&#8315;</button>
+            <button class="layout-btn" onclick="adjustFont(1)">A&#8314;</button>
+          </div>
+        </div>
+        <div class="overflow-row">
+          <span class="overflow-label">Layout</span>
+          <div class="layout-toggle">
+            <button id="btn-single-m"  class="layout-btn active" onclick="setLayout('single')">&#9646; Single</button>
+            <button id="btn-columns-m" class="layout-btn"        onclick="setLayout('columns')">&#9646;&#9646; Col</button>
+          </div>
+        </div>
+        <div class="overflow-row">
+          <button class="parallel-toggle" id="parallel-toggle-m" onclick="toggleParallel();closeOverflow()"
+                  style="width:100%">&#9783; Compare</button>
+        </div>
+      </div>
     </div>
-
-    <!-- Parallel panel toggle -->
-    <button class="parallel-toggle" id="parallel-toggle" onclick="toggleParallel()"
-            title="Compare verses across translations">&#9783; Compare</button>
   </header>
 
   <!-- Reader -->
@@ -738,9 +761,21 @@ applyFont(getSavedFont());
 // ---------------------------------------------------------------------------
 function setLayout(mode) {
   document.getElementById('reader').classList.toggle('columns', mode === 'columns');
-  document.getElementById('btn-single').classList.toggle('active',  mode === 'single');
-  document.getElementById('btn-columns').classList.toggle('active', mode === 'columns');
+  ['btn-single','btn-single-m'].forEach(function(id) {
+    var el = document.getElementById(id); if (el) el.classList.toggle('active', mode === 'single');
+  });
+  ['btn-columns','btn-columns-m'].forEach(function(id) {
+    var el = document.getElementById(id); if (el) el.classList.toggle('active', mode === 'columns');
+  });
   try { localStorage.setItem('br-layout', mode); } catch(e) {}
+}
+
+function toggleOverflow() {
+  var menu = document.getElementById('overflow-menu');
+  menu.classList.toggle('open');
+}
+function closeOverflow() {
+  document.getElementById('overflow-menu').classList.remove('open');
 }
 (function() {
   var saved = 'single';
@@ -761,9 +796,10 @@ function toggleSection(id, btn) {
 }
 
 // ---------------------------------------------------------------------------
-// Sidebar overlay on small screens
-// ---------------------------------------------------------------------------
+// Close overflow menu and sidebar when clicking outside
 document.addEventListener('click', function(e) {
+  var ow = document.getElementById('overflow-wrap');
+  if (ow && !ow.contains(e.target)) closeOverflow();
   if (window.innerWidth < 768) {
     var sidebar = document.getElementById('sidebar');
     if (!sidebar.contains(e.target) && !e.target.classList.contains('sidebar-toggle')) {

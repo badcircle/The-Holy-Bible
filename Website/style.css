@@ -564,6 +564,64 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* ---------------------------------------------------------------------------
+   Overflow menu (mobile ⋯ button)
+   --------------------------------------------------------------------------- */
+.inline-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.overflow-wrap {
+  display: none;   /* shown only on mobile via media query */
+  position: relative;
+  flex-shrink: 0;
+}
+.overflow-btn {
+  background: none;
+  border: 1px solid var(--separator);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.overflow-btn:hover { color: var(--text-body); border-color: var(--gold-border); }
+
+.overflow-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--separator);
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  min-width: 200px;
+  z-index: 300;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  gap: 0.5rem;
+  flex-direction: column;
+}
+.overflow-menu.open { display: flex; }
+
+.overflow-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.overflow-label {
+  font-family: var(--font-ui);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
    Mobile / responsive
    --------------------------------------------------------------------------- */
 @media (max-width: 900px) {
@@ -584,9 +642,12 @@ a { color: inherit; text-decoration: none; }
 
   .sidebar-toggle { display: flex; }
 
-  .toolbar { padding: 0 0.6rem; }
+  .toolbar { padding: 0 0.6rem; gap: 0.4rem; }
 
-  .toolbar-title { font-size: 0.9rem; }
+  .toolbar-title { font-size: 0.85rem; }
+
+  .inline-controls { display: none; }
+  .overflow-wrap   { display: block; }
 
   .reader { padding: 1.5rem 1rem 3rem; }
 
@@ -594,7 +655,6 @@ a { color: inherit; text-decoration: none; }
 }
 
 @media (max-width: 480px) {
-  .parallel-toggle { display: none; }
   :root { --parallel-w: 100vw; }
   .parallel-panel {
     top: 0;

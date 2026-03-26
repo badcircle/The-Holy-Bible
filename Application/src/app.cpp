@@ -975,7 +975,9 @@ static void render_reader(AppState* app) {
     // splits[c] = first verse index in column c; splits[N] = total
     int splits[MAX_COLS + 1];
     splits[0] = 0;
-    splits[N] = total;
+    // Default: all verses in column 0, remaining columns empty.
+    // This handles total==0 and total==1 without leaving splits uninitialized.
+    for (int c = 1; c <= N; ++c) splits[c] = total;
 
     if (N > 1 && total > 1) {
         float target = total_h / (float)N;

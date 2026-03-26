@@ -1358,9 +1358,7 @@ static void render_toolbar(AppState* app) {
         if (ImGui::IsKeyPressed(ImGuiKey_KeypadAdd,      false)) set_font_size(app->font_size + 2.0f);
         if (ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract, false)) set_font_size(app->font_size - 2.0f);
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
-            !ImGui::IsPopupOpen("##bctx") &&
-            !ImGui::IsPopupOpen("##chpicker"))
+    if (ImGui::IsKeyPressed(ImGuiKey_F1, false))
         app->request_shortcuts_popup = true;
 
     if (app->fonts.ui) ImGui::PopFont();
@@ -1453,7 +1451,8 @@ static void render_shortcuts_popup(AppState* app) {
     row("A+  /  A-  (toolbar)","Increase / decrease font size");
 
     section("OTHER");
-    row("Esc",               "Show this help / close popups");
+    row("F1",                "Show this help");
+    row("Esc",               "Close popups");
 
     ImGui::Spacing();
     if (app->fonts.ui) ImGui::PopFont();

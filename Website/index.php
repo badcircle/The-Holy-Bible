@@ -235,11 +235,14 @@ function nav_url(string $trans, int $tid, int $book, int $ch): string {
 // Request state
 // ---------------------------------------------------------------------------
 
-// Case-insensitive lookup so URLs like /kjv/… and /KJV/… both work
+// Case-insensitive lookup so /kjv, /Septuagint, /septuagint, etc. all work
 $trans_key = $_GET['trans'] ?? 'KJV';
 if (!array_key_exists($trans_key, $TRANSLATIONS)) {
-    $upper = strtoupper($trans_key);
-    $trans_key = array_key_exists($upper, $TRANSLATIONS) ? $upper : 'KJV';
+    $found = 'KJV';
+    foreach ($TRANSLATIONS as $k => $_) {
+        if (strcasecmp($k, $trans_key) === 0) { $found = $k; break; }
+    }
+    $trans_key = $found;
 }
 $trans   = $TRANSLATIONS[$trans_key];
 $is_rtl  = $trans['rtl'];
@@ -463,7 +466,7 @@ if (isset($_GET['ajax'])) {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Pirata+One&family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=Crimson+Pro:wght@400;600&family=Roboto:wght@400;500&family=Noto+Serif+Hebrew:wght@400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="<?= BASE_PATH ?>style.css">
 </head>
 <body>
 
@@ -795,7 +798,7 @@ function loadParallel(tid, book, chapter, verse) {
   title.textContent = 'Verse ' + chapter + ':' + verse;
   body.innerHTML    = '<p class="loading">Loading\u2026</p>';
 
-  fetch('api.php?tid=' + tid + '&book=' + book + '&ch=' + chapter + '&verse=' + verse)
+  fetch(BASE_PATH + 'api.php?tid=' + tid + '&book=' + book + '&ch=' + chapter + '&verse=' + verse)
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.error) { body.innerHTML = '<p class="error-msg">' + data.error + '</p>'; return; }

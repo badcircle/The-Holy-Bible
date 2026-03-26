@@ -396,7 +396,10 @@ void render_reader(AppState* app) {
 
             // --- Dropcap for verse 1 (LTR only, first column only) -------
             bool did_dropcap = false;
-            if (!rtl && from == 0 && i == from && v.verse_id == 1 &&
+            const bool is_english = (app->current_translation >= 0 &&
+                app->current_translation < (int)app->translations.size() &&
+                strcmp(app->translations[app->current_translation].name, "KJV") == 0);
+            if (!rtl && is_english && from == 0 && i == from && v.verse_id == 1 &&
                 app->fonts.dropcap && v.text[0] != '\0')
             {
                 // Count bytes in first UTF-8 codepoint

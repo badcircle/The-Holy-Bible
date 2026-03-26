@@ -1358,11 +1358,107 @@ static void render_toolbar(AppState* app) {
         if (ImGui::IsKeyPressed(ImGuiKey_KeypadAdd,      false)) set_font_size(app->font_size + 2.0f);
         if (ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract, false)) set_font_size(app->font_size - 2.0f);
     }
+    if (ImGui::IsKeyPressed(ImGuiKey_Slash, false) && ImGui::GetIO().KeyShift)
+        if (!ImGui::IsPopupOpen("##shortcuts"))
+            ImGui::OpenPopup("##shortcuts");
 
     if (app->fonts.ui) ImGui::PopFont();
 
     ImGui::EndChild();
     ImGui::PopStyleColor(); // ChildBg
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard shortcuts popup
+// ---------------------------------------------------------------------------
+
+static void render_shortcuts_popup(AppState* app) {
+    ImGuiIO& io = ImGui::GetIO();
+    float pw = 480.0f;
+    if (pw > io.DisplaySize.x - 40.0f) pw = io.DisplaySize.x - 40.0f;
+
+    ImGui::SetNextWindowPos(
+        {io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f},
+        ImGuiCond_Always, {0.5f, 0.5f});
+    ImGui::SetNextWindowSizeConstraints({pw, 80.0f}, {pw, io.DisplaySize.y * 0.85f});
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    bool open = ImGui::BeginPopupModal("##shortcuts", nullptr,
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove     | ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::PopStyleVar();
+    if (!open) return;
+
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape) ||
+        (ImGui::IsKeyPressed(ImGuiKey_Slash, false) && ImGui::GetIO().KeyShift))
+        ImGui::CloseCurrentPopup();
+
+    if (app->fonts.ui) ImGui::PushFont(app->fonts.ui);
+
+    // Title + close
+    static constexpr ImVec4 C_TITLE = {0.92f, 0.87f, 0.65f, 1.0f};
+    ImGui::PushStyleColor(ImGuiCol_Text, C_TITLE);
+    ImGui::TextUnformatted("Keyboard Shortcuts");
+    ImGui::PopStyleColor();
+    {
+        float cbw = ImGui::CalcTextSize("close").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        ImGui::SameLine(ImGui::GetWindowWidth() - cbw - ImGui::GetStyle().WindowPadding.x);
+        ImGui::PushStyleColor(ImGuiCol_Button,        {0.0f, 0.0f, 0.0f, 0.0f});
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, {0.28f, 0.25f, 0.18f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  {0.38f, 0.33f, 0.22f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_Text, COL_TEXT_DIM);
+        if (ImGui::SmallButton("close")) ImGui::CloseCurrentPopup();
+        ImGui::PopStyleColor(4);
+    }
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Row helper: key column + description column
+    static constexpr float KEY_W = 160.0f;
+    static constexpr ImVec4 C_KEY = {0.85f, 0.75f, 0.50f, 1.0f};
+    auto row = [&](const char* keys, const char* desc) {
+        ImGui::PushStyleColor(ImGuiCol_Text, C_KEY);
+        ImGui::TextUnformatted(keys);
+        ImGui::PopStyleColor();
+        ImGui::SameLine(KEY_W);
+        ImGui::PushStyleColor(ImGuiCol_Text, COL_TEXT_BODY);
+        ImGui::TextUnformatted(desc);
+        ImGui::PopStyleColor();
+    };
+    auto section = [&](const char* label) {
+        ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_Text, COL_TEXT_DIM);
+        ImGui::TextUnformatted(label);
+        ImGui::PopStyleColor();
+        ImGui::PushStyleColor(ImGuiCol_Separator, {0.35f, 0.30f, 0.18f, 0.6f});
+        ImGui::Separator();
+        ImGui::PopStyleColor();
+        ImGui::Spacing();
+    };
+
+    section("NAVIGATION");
+    row("Left / Right",      "Previous / next chapter");
+    row("Page Up / Page Down","Previous / next chapter");
+    row("Up / Down",         "Scroll");
+
+    section("VIEW");
+    row("Tab",               "Toggle book sidebar");
+    row("\\",                "Toggle parallel-verse tray");
+    row("F11",               "Toggle fullscreen");
+
+    section("TEXT SIZE");
+    row("Ctrl  +  /  -",     "Increase / decrease font size");
+    row("Ctrl  0",           "Reset font size");
+    row("Numpad  +  /  -",   "Increase / decrease font size");
+    row("A+  /  A-  (toolbar)","Increase / decrease font size");
+
+    section("OTHER");
+    row("?",                 "Show this help");
+    row("Esc",               "Close popups");
+
+    ImGui::Spacing();
+    if (app->fonts.ui) ImGui::PopFont();
+    ImGui::EndPopup();
 }
 
 // ---------------------------------------------------------------------------
@@ -1406,6 +1502,8 @@ void app_render(AppState* app) {
     // Tray is a child of the root window submitted after the reader,
     // so it always draws on top without any z-order tricks.
     render_tray(app);
+
+    render_shortcuts_popup(app);
 
     ImGui::End();
 }

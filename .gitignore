@@ -27,6 +27,7 @@ Application/assets/fonts/**/web/
 
 # MSVC / IDE artifacts
 .vs/
+.vscode/
 *.user
 *.suo
 *.VC.db

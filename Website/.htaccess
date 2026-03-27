@@ -6,14 +6,38 @@ RewriteEngine On
 # If serving from the root, leave as-is:
 RewriteBase /
 
-# Serve real files and directories directly (style.css, api.php, Bibles/, etc.)
+# ---------------------------------------------------------------------------
+# Security — block sensitive paths before any other logic
+# ---------------------------------------------------------------------------
+
+# Bibles/ directory must never be served over HTTP (contains DB files)
+RewriteRule ^Bibles/ - [F,L]
+
+# Block dotfiles: .env, .git, .htaccess, .htpasswd, etc.
+RewriteRule (^|/)\. - [F,L]
+
+# Only index.php and api.php are valid PHP entry points; block everything else.
+# This catches wp-login.php, xmlrpc.php, and all other PHP probes.
+RewriteCond %{REQUEST_URI} \.php$
+RewriteCond %{REQUEST_URI} !/index\.php$
+RewriteCond %{REQUEST_URI} !/api\.php$
+RewriteRule ^ - [F,L]
+
+# ---------------------------------------------------------------------------
+# Pretty URL routing → index.php
+# Real files (style.css, api.php) are served directly by Apache because
+# the !-f condition below prevents them from being rewritten.
+# ---------------------------------------------------------------------------
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 
-# /trans/tid/book/ch  →  index.php?trans=…&tid=…&book=…&ch=…
+# /trans/tid/book/ch/verse
+RewriteRule ^([a-zA-Z]+)/([0-9]+)/([0-9]+)/([0-9]+)/([0-9]+)/?$ index.php?trans=$1&tid=$2&book=$3&ch=$4&verse=$5 [L,QSA]
+
+# /trans/tid/book/ch
 RewriteRule ^([a-zA-Z]+)/([0-9]+)/([0-9]+)/([0-9]+)/?$ index.php?trans=$1&tid=$2&book=$3&ch=$4 [L,QSA]
 
-# /trans/tid/book     →  chapter 1
+# /trans/tid/book
 RewriteRule ^([a-zA-Z]+)/([0-9]+)/([0-9]+)/?$ index.php?trans=$1&tid=$2&book=$3&ch=1 [L,QSA]
 
 # /trans/tid

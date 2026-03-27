@@ -16,11 +16,12 @@ RewriteRule ^Bibles/ - [F,L]
 # Block dotfiles: .env, .git, .htaccess, .htpasswd, etc.
 RewriteRule (^|/)\. - [F,L]
 
-# Only index.php and api.php are valid PHP entry points; block everything else.
+# Only these PHP entry points are valid; block everything else.
 # This catches wp-login.php, xmlrpc.php, and all other PHP probes.
 RewriteCond %{REQUEST_URI} \.php$
 RewriteCond %{REQUEST_URI} !/index\.php$
 RewriteCond %{REQUEST_URI} !/api\.php$
+RewriteCond %{REQUEST_URI} !/search\.php$
 RewriteRule ^ - [F,L]
 
 # ---------------------------------------------------------------------------

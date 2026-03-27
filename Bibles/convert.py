@@ -41,7 +41,7 @@ BOOK_MAP = {
     "deu":  (OT,  5,  "Deu",   "Deuteronomy"),
     "Jos":  (OT,  6,  "Jos",   "Joshua"),
     "jos":  (OT,  6,  "Jos",   "Joshua"),
-    "JsA":  (OT,  6,  "Jos",   "Joshua"),           # LXX A text
+    "JsA":  (DC, 20,  "Jos A", "Joshua (A Text)"),   # LXX A text (partial variant)
     "Jdg":  (OT,  7,  "Jdg",   "Judges"),
     "jdg":  (OT,  7,  "Jdg",   "Judges"),
     "JdA":  (OT,  7,  "Jdg",   "Judges"),           # LXX A text (shorter)
@@ -164,7 +164,7 @@ BOOK_MAP = {
     "Aza":  (DC, 17,  "Aza",   "Prayer of Azariah"),
     "Ode":  (DC, 18,  "Ode",   "Odes"),
     "Pss":  (DC, 19,  "Pss",   "Psalms of Solomon"),
-    "JsB":  (DC, 20,  "Jos B", "Joshua (B Text)"),  # LXX B text
+    "JsB":  (OT,  6,  "Jos",   "Joshua"),            # LXX B text (full canonical)
     "JdB":  (DC, 21,  "Jdg B", "Judges (B Text)"),  # LXX B text
     "Lao":  (DC, 22,  "Lao",   "Epistle to the Laodiceans"),
 }
@@ -335,6 +335,13 @@ def build_db(src: Path, dst: Path, decode_html: bool = False, strip_tags: bool =
     if not verses:
         print(f"    No verses found, skipping.")
         return
+
+    # A chapter=0 / verse=0 entry is a book prologue heading; fold it into
+    # chapter 1 so the normalization step doesn't create an extra chapter offset.
+    # (Sirach's ch=0 prologue has real verses 1-36 and is intentionally left as
+    # its own chapter by the normalization below.)
+    verses = [(tid, bid, 1 if (ch == 0 and v == 0) else ch, v, text)
+              for tid, bid, ch, v, text in verses]
 
     # Normalize chapter numbers to be sequential starting from 1 for each book.
     # Some source files use non-1-based chapter numbering (e.g. Additions to

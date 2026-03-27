@@ -22,9 +22,10 @@ if (!array_key_exists($trans_key, $TRANSLATIONS)) {
     }
 }
 $trans      = $TRANSLATIONS[$trans_key];
-$is_rtl     = $trans['rtl'];
-$is_kjv     = ($trans_key === 'KJV');
-$is_strongs = !empty($trans['strongs']);
+$is_rtl        = $trans['rtl'];
+$is_kjv        = ($trans_key === 'KJV');
+$is_strongs    = !empty($trans['strongs']);
+$is_interlinear = !empty($trans['interlinear']);
 
 $pdo   = open_db($BIBLES_DIR . '/' . $trans['file']);
 $db_ok = ($pdo !== null);
@@ -98,7 +99,7 @@ $verses = ($db_ok && $current_book) ? get_chapter($pdo, $tid, $book_id, $chapter
 $verse_html   = [];
 $strongs_data = new stdClass();
 
-if ($is_strongs && $db_ok && $current_book) {
+if (($is_strongs || $is_interlinear) && $db_ok && $current_book) {
     $ks_pdo = open_db($BIBLES_DIR . '/KJV_strongs.db');
     $s_pdo  = open_db($BIBLES_DIR . '/strongs.db');
 
@@ -149,6 +150,28 @@ if ($is_strongs && $db_ok && $current_book) {
     }
 }
 
+// Fetch the Greek and Hebrew texts for the interlinear view
+$grk_verses_il = [];
+$heb_verses_il = [];
+if ($is_interlinear && $db_ok && $current_book) {
+    $grk_pdo = open_db($BIBLES_DIR . '/' . ($tid === 1 ? 'Septuagint.db' : 'UGNT.db'));
+    if ($grk_pdo) {
+        // In the LXX, Ezra and Nehemiah are united as 2 Esdras (DC tid=3, book=15, ch 1-23).
+        // Ezra (OT book 15) maps to 2 Esdras ch 1-10 (same chapter number).
+        // Nehemiah (OT book 16) maps to 2 Esdras ch 11-23 (chapter + 10).
+        $lxx_tid  = $tid;
+        $lxx_book = $book_id;
+        $lxx_ch   = $chapter;
+        if ($tid === 1 && $book_id === 15) { $lxx_tid = 3; }
+        if ($tid === 1 && $book_id === 16) { $lxx_tid = 3; $lxx_book = 15; $lxx_ch = $chapter + 10; }
+        $grk_verses_il = get_chapter($grk_pdo, $lxx_tid, $lxx_book, $lxx_ch);
+    }
+    if ($tid === 1) {
+        $heb_pdo = open_db($BIBLES_DIR . '/Tanakh.db');
+        if ($heb_pdo) $heb_verses_il = get_chapter($heb_pdo, $tid, $book_id, $chapter);
+    }
+}
+
 $book_title = $current_book ? htmlspecialchars($current_book['LongName']) : '';
 $page_title = $book_title   ? "$book_title $chapter"                      : 'Bible Reader';
 
@@ -159,13 +182,11 @@ if (isset($_GET['ajax'])) {
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');
     echo json_encode([
-        'reader_html'   => render_reader_html(
-            $db_ok, $verses, $book_title, $chapter,
-            $is_kjv, $is_rtl, $tid, $book_id,
-            $prev_url, $next_url, $trans,
-            $is_strongs, $verse_html
-        ),
+        'reader_html'   => $is_interlinear
+            ? render_interlinear_html($db_ok, $verses, $book_title, $chapter, $tid, $book_id, $prev_url, $next_url, $verse_html, $grk_verses_il, $heb_verses_il)
+            : render_reader_html($db_ok, $verses, $book_title, $chapter, $is_kjv, $is_rtl, $tid, $book_id, $prev_url, $next_url, $trans, $is_strongs, $verse_html),
         'page_title'    => $page_title,
+        'book_title'    => $book_title,
         'toolbar_title' => $book_title . ($current_book ? " \u{2014} Ch. $chapter" : ''),
         'prev_url'      => $prev_url,
         'next_url'      => $next_url,
@@ -176,9 +197,10 @@ if (isset($_GET['ajax'])) {
         'trans'         => $trans_key,
         'is_rtl'        => $is_rtl,
         'strongs_data'  => $strongs_data,
-        'orig_html'     => $orig_verses ? render_orig_col($orig_verses) : null,
+        'orig_html'     => (!$is_interlinear && $orig_verses) ? render_orig_col($orig_verses) : null,
         'orig_label'    => $orig_label,
         'orig_rtl'      => $orig_rtl,
+        'book_name'     => book_display_name($tid, $book_id) ?? '',
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -222,20 +244,25 @@ foreach ($books_by_tid as $group_tid => $group_books) {
     $sidebar_sections .= '    </ul>' . "\n";
 }
 
-$_raw        = render_reader_html(
-    $db_ok, $verses, $book_title, $chapter,
-    $is_kjv, $is_rtl, $tid, $book_id,
-    $prev_url, $next_url, $trans,
-    $is_strongs, $verse_html
-);
+$_raw = $is_interlinear
+    ? render_interlinear_html($db_ok, $verses, $book_title, $chapter, $tid, $book_id, $prev_url, $next_url, $verse_html, $grk_verses_il, $heb_verses_il)
+    : render_reader_html($db_ok, $verses, $book_title, $chapter, $is_kjv, $is_rtl, $tid, $book_id, $prev_url, $next_url, $trans, $is_strongs, $verse_html);
 $reader_html = '      ' . str_replace("\n", "\n      ", rtrim($_raw)) . "\n";
 unset($_raw);
+
+$strongs_heading_html = '';
+if ($is_strongs) {
+    $strongs_heading_html = '    <h1 class="chapter-heading" id="reader-heading">' . $book_title
+                          . '<span class="chapter-label">Chapter ' . $chapter . '</span></h1>' . "\n";
+}
 
 $orig_panel_html = '';
 if ($is_strongs) {
     $_orig       = render_orig_col($orig_verses);
     $_orig       = '      ' . str_replace("\n", "\n      ", rtrim($_orig)) . "\n";
-    $orig_panel_html = '    <article class="reader reader-orig" id="reader-orig" dir="' . ($orig_rtl ? 'rtl' : 'ltr') . '">' . "\n"
+    $orig_panel_html = '    <article class="reader reader-orig" id="reader-orig" dir="' . ($orig_rtl ? 'rtl' : 'ltr') . '"'
+                     . ' data-tid="' . $tid . '" data-book="' . $book_id . '" data-ch="' . $chapter . '"'
+                     . ' data-book-name="' . htmlspecialchars(book_display_name($tid, $book_id) ?? '') . '">' . "\n"
                      . '      <div class="orig-label">' . htmlspecialchars($orig_label) . '</div>' . "\n"
                      . $_orig
                      . '    </article>' . "\n";
@@ -263,95 +290,108 @@ if ($is_strongs) {
 </head>
 <body>
 
-<!-- ================================================================ -->
-<!-- The Sidebar — wherein all the books are numbered                 -->
-<!-- ================================================================ -->
+<!-- ================================================================
+     The Toolbar — spanning the full width at the top
+     ================================================================ -->
+<header class="toolbar">
+  <button class="sidebar-toggle" onclick="document.body.classList.toggle('sidebar-open')"
+          title="Toggle sidebar" aria-label="Toggle sidebar">&#9776;</button>
+
+  <div class="toolbar-trans">
+    <select class="trans-select" onchange="switchTranslation(this.value)">
+<?= $trans_options ?>    </select>
+  </div>
+
+  <span class="toolbar-title" id="toolbar-title"><?= $book_title ?><?= $current_book ? " &mdash; Ch. $chapter" : '' ?></span>
+
+  <nav class="chapter-nav" aria-label="Chapter navigation">
+    <a href="<?= $prev_url ?? '#' ?>" id="nav-prev" class="nav-btn<?= $prev_url ? ' nav-ajax' : ' disabled' ?>" title="Previous chapter">&#8249;</a>
+    <form method="get" class="chapter-jump" id="chapter-form">
+      <input type="hidden" name="trans" value="<?= htmlspecialchars($trans_key) ?>">
+      <input type="hidden" name="tid"   id="form-tid"  value="<?= $tid ?>">
+      <input type="hidden" name="book"  id="form-book" value="<?= $book_id ?>">
+      <input type="number" name="ch" id="ch-input" value="<?= $chapter ?>" min="1" max="<?= $num_chapters ?>" class="ch-input" title="Chapter" aria-label="Chapter number">
+      <span class="ch-of">/ <span id="ch-max"><?= $num_chapters ?></span></span>
+    </form>
+    <a href="<?= $next_url ?? '#' ?>" id="nav-next" class="nav-btn<?= $next_url ? ' nav-ajax' : ' disabled' ?>" title="Next chapter">&#8250;</a>
+  </nav>
+
+  <button class="toolbar-btn" id="btn-search" onclick="openSearch()" title="Search (/ or Ctrl+K)" aria-label="Search">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+  </button>
+
+  <div class="inline-controls">
+    <div class="layout-toggle" title="Font size">
+      <button class="layout-btn" onclick="adjustFont(-1)" title="Decrease font size">A&#8315;</button>
+      <button class="layout-btn" onclick="adjustFont(1)"  title="Increase font size">A&#8314;</button>
+    </div>
+    <div class="layout-toggle" title="Toggle column layout">
+      <button id="btn-single"  onclick="setLayout('single')"  class="layout-btn active">&#9646; Single</button>
+      <button id="btn-columns" onclick="setLayout('columns')" class="layout-btn">&#9646;&#9646; Columns</button>
+    </div>
+    <button class="parallel-toggle" id="parallel-toggle" onclick="toggleParallel()" title="Compare verses across translations">&#9783; Compare</button>
+  </div>
+
+  <div class="overflow-wrap" id="overflow-wrap">
+    <button class="overflow-btn" onclick="toggleOverflow()" title="Options">&#8943;</button>
+    <div class="overflow-menu" id="overflow-menu">
+      <div class="overflow-row">
+        <span class="overflow-label">Version</span>
+        <select class="trans-select overflow-trans" onchange="switchTranslation(this.value);closeOverflow()">
+<?= $trans_options ?>        </select>
+      </div>
+      <div class="overflow-row">
+        <span class="overflow-label">Font</span>
+        <div class="layout-toggle">
+          <button class="layout-btn" onclick="adjustFont(-1)">A&#8315;</button>
+          <button class="layout-btn" onclick="adjustFont(1)">A&#8314;</button>
+        </div>
+      </div>
+      <div class="overflow-row">
+        <span class="overflow-label">Layout</span>
+        <div class="layout-toggle">
+          <button id="btn-single-m"  class="layout-btn active" onclick="setLayout('single')">&#9646; Single</button>
+          <button id="btn-columns-m" class="layout-btn"        onclick="setLayout('columns')">&#9646;&#9646; Col</button>
+        </div>
+      </div>
+      <div class="overflow-row">
+        <button class="parallel-toggle" id="parallel-toggle-m" onclick="toggleParallel();closeOverflow()" style="width:100%">&#9783; Compare</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ================================================================
+     The Body Below — the sidebar and the main reader side by side
+     ================================================================ -->
+<div class="body-below">
+
+<!-- ================================================================
+     The Sidebar — wherein all the books are numbered
+     ================================================================ -->
 <nav class="sidebar" id="sidebar">
   <div class="sidebar-inner">
-
-    <div class="sidebar-trans">
-      <form method="get" id="trans-form">
-        <select name="trans" onchange="switchTranslation(this.value)" class="trans-select">
-<?= $trans_options ?>        </select>
-        <input type="hidden" name="tid"  id="trans-tid"  value="<?= $tid ?>">
-        <input type="hidden" name="book" id="trans-book" value="<?= $book_id ?>">
-        <input type="hidden" name="ch"   id="trans-ch"   value="<?= $chapter ?>">
-      </form>
-    </div>
-
 <?= $sidebar_sections ?>  </div>
 </nav>
 
-<!-- ================================================================ -->
-<!-- The Main Area — the toolbar, the reader, and all that is therein -->
-<!-- ================================================================ -->
+<!-- ================================================================
+     The Main Area — the reader, and all that is therein
+     ================================================================ -->
 <div class="main">
 
-  <header class="toolbar">
-    <button class="sidebar-toggle" onclick="document.body.classList.toggle('sidebar-open')"
-            title="Toggle sidebar" aria-label="Toggle sidebar">&#9776;</button>
-
-    <span class="toolbar-title" id="toolbar-title"><?= $book_title ?><?= $current_book ? " &mdash; Ch. $chapter" : '' ?></span>
-
-    <nav class="chapter-nav" aria-label="Chapter navigation">
-      <a href="<?= $prev_url ?? '#' ?>" id="nav-prev" class="nav-btn<?= $prev_url ? ' nav-ajax' : ' disabled' ?>" title="Previous chapter">&#8249;</a>
-      <form method="get" class="chapter-jump" id="chapter-form">
-        <input type="hidden" name="trans" value="<?= htmlspecialchars($trans_key) ?>">
-        <input type="hidden" name="tid"   id="form-tid"  value="<?= $tid ?>">
-        <input type="hidden" name="book"  id="form-book" value="<?= $book_id ?>">
-        <input type="number" name="ch" id="ch-input" value="<?= $chapter ?>" min="1" max="<?= $num_chapters ?>" class="ch-input" title="Chapter" aria-label="Chapter number">
-        <span class="ch-of">/ <span id="ch-max"><?= $num_chapters ?></span></span>
-      </form>
-      <a href="<?= $next_url ?? '#' ?>" id="nav-next" class="nav-btn<?= $next_url ? ' nav-ajax' : ' disabled' ?>" title="Next chapter">&#8250;</a>
-    </nav>
-
-    <div class="inline-controls">
-      <div class="layout-toggle" title="Font size">
-        <button class="layout-btn" onclick="adjustFont(-1)" title="Decrease font size">A&#8315;</button>
-        <button class="layout-btn" onclick="adjustFont(1)"  title="Increase font size">A&#8314;</button>
-      </div>
-      <div class="layout-toggle" title="Toggle column layout">
-        <button id="btn-single"  onclick="setLayout('single')"  class="layout-btn active">&#9646; Single</button>
-        <button id="btn-columns" onclick="setLayout('columns')" class="layout-btn">&#9646;&#9646; Columns</button>
-      </div>
-      <button class="parallel-toggle" id="parallel-toggle" onclick="toggleParallel()" title="Compare verses across translations">&#9783; Compare</button>
-    </div>
-
-    <div class="overflow-wrap" id="overflow-wrap">
-      <button class="overflow-btn" onclick="toggleOverflow()" title="Options">&#8943;</button>
-      <div class="overflow-menu" id="overflow-menu">
-        <div class="overflow-row">
-          <span class="overflow-label">Font</span>
-          <div class="layout-toggle">
-            <button class="layout-btn" onclick="adjustFont(-1)">A&#8315;</button>
-            <button class="layout-btn" onclick="adjustFont(1)">A&#8314;</button>
-          </div>
-        </div>
-        <div class="overflow-row">
-          <span class="overflow-label">Layout</span>
-          <div class="layout-toggle">
-            <button id="btn-single-m"  class="layout-btn active" onclick="setLayout('single')">&#9646; Single</button>
-            <button id="btn-columns-m" class="layout-btn"        onclick="setLayout('columns')">&#9646;&#9646; Col</button>
-          </div>
-        </div>
-        <div class="overflow-row">
-          <button class="parallel-toggle" id="parallel-toggle-m" onclick="toggleParallel();closeOverflow()" style="width:100%">&#9783; Compare</button>
-        </div>
-      </div>
-    </div>
-  </header>
-
-  <div id="reader-wrap"<?= $is_strongs ? ' data-strongs="1"' : '' ?>>
-    <article class="reader" id="reader" dir="<?= $is_rtl ? 'rtl' : 'ltr' ?>">
+  <div id="reader-wrap"<?= $is_strongs ? ' data-strongs="1"' : ($is_interlinear ? ' data-interlinear="1"' : '') ?>>
+<?= $strongs_heading_html ?>    <article class="reader" id="reader" dir="<?= $is_rtl ? 'rtl' : 'ltr' ?>">
 <?= $reader_html ?>    </article>
 <?= $orig_panel_html ?>
   </div>
 
 </div>
 
-<!-- ================================================================ -->
-<!-- The Parallel Panel — comparing the selfsame verse across translations -->
-<!-- ================================================================ -->
+</div>
+
+<!-- ================================================================
+     The Parallel Panel — comparing the selfsame verse across translations
+     ================================================================ -->
 <aside class="parallel-panel" id="parallel-panel" aria-label="Parallel verse comparison">
   <div class="parallel-header">
     <span class="parallel-title" id="parallel-title">Parallel Verse</span>
@@ -369,12 +409,57 @@ if ($is_strongs) {
 <!-- The Strong's Popover — showing the meaning of the original words -->
 <div id="strongs-popup" class="strongs-popup" aria-hidden="true"></div>
 
+<!-- ================================================================
+     Search overlay
+     ================================================================ -->
+<div id="search-overlay" hidden aria-modal="true" role="dialog" aria-label="Search the scriptures">
+  <div class="search-card">
+
+    <div class="search-input-row">
+      <svg class="search-mag" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" width="18" height="18" aria-hidden="true">
+        <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/>
+      </svg>
+      <input id="search-q" type="text" autocomplete="off" spellcheck="false"
+             placeholder="Search the scriptures…" aria-label="Search query">
+      <kbd class="search-esc" onclick="closeSearch()" title="Close search">esc</kbd>
+    </div>
+
+    <div class="search-bar">
+      <div class="search-filters" id="search-filters">
+        <button class="sf active" data-tid="0">All</button>
+<?php
+// Default search translation: map Interlinear/KJVPlus → KJV
+$_strans = (!empty($trans['interlinear']) || $trans_key === 'KJVPlus') ? 'KJV' : $trans_key;
+foreach ($TRANSLATIONS[$_strans]['tids'] as $stid):
+?>
+        <button class="sf" data-tid="<?= $stid ?>"><?= $TID_LABELS[$stid] ?? 'Other' ?></button>
+<?php endforeach; ?>
+      </div>
+      <select id="search-trans-sel" class="search-trans-sel" aria-label="Search translation">
+<?php
+$_slabels = ['KJV'=>'KJV','Septuagint'=>'LXX','Vulgate'=>'Vulgate','UGNT'=>'Greek NT','Tanakh'=>'Hebrew','Apocrypha'=>'Apocrypha'];
+foreach ($TRANSLATIONS as $_sk => $_st):
+    if (!empty($_st['interlinear']) || $_sk === 'KJVPlus') continue;
+?>
+        <option value="<?= htmlspecialchars($_sk) ?>"<?= $_sk === $_strans ? ' selected' : '' ?>><?= htmlspecialchars($_slabels[$_sk] ?? $_sk) ?></option>
+<?php endforeach; ?>
+      </select>
+      <span id="search-status" class="search-status"></span>
+    </div>
+
+    <div id="search-results" class="search-results">
+      <p class="search-prompt">Type a word or phrase &mdash; <em>grace and peace</em>, <em>fear not</em>&hellip;</p>
+    </div>
+
+  </div>
+</div>
+
 <script>
 // ---------------------------------------------------------------------------
-// Constants handed down from PHP
+// Constants handed down from the server of requests
 // ---------------------------------------------------------------------------
 var BASE_PATH    = <?= json_encode(BASE_PATH) ?>;
-var STRONGS_DATA = <?= json_encode($strongs_data, JSON_UNESCAPED_UNICODE) ?>;
+var STRONGS_DATA = <?= json_encode($strongs_data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) ?>;
 
 // ---------------------------------------------------------------------------
 // Utility functions, given for the common benefit
@@ -447,26 +532,37 @@ function setLayout(mode) {
 (function() {
   var saved = 'single';
   try { saved = localStorage.getItem('br-layout') || 'single'; } catch(e) {}
-  if (saved === 'columns') setLayout('columns');
+  if (saved === 'columns' && !(window.innerWidth <= 767 && $readerWrap && $readerWrap.dataset.interlinear === '1')) {
+    setLayout('columns');
+  }
 })();
 
 // ---------------------------------------------------------------------------
 // The loading of chapters, without the reloading of the whole page
 // ---------------------------------------------------------------------------
-function loadChapter(url) {
+function loadChapter(url, focusVerse) {
   var ajaxUrl = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'ajax=1';
   fetch(ajaxUrl)
     .then(function(r) { return r.json(); })
-    .then(function(d) { applyChapter(d, url); })
+    .then(function(d) { applyChapter(d, url, focusVerse || 0); })
     .catch(function() { window.location = url; });
 }
 
-function applyChapter(d, url) {
+function applyChapter(d, url, focusVerse) {
   $reader.innerHTML = d.reader_html;
   $reader.setAttribute('dir', d.is_rtl ? 'rtl' : 'ltr');
 
+  var rh = document.getElementById('reader-heading');
+  if (rh) {
+    rh.innerHTML = escHtml(d.book_title || '') + '<span class="chapter-label">Chapter ' + d.chapter + '</span>';
+  }
+
   var origPanel = document.getElementById('reader-orig');
   if (origPanel) {
+    origPanel.dataset.tid      = d.tid;
+    origPanel.dataset.book     = d.book_id;
+    origPanel.dataset.ch       = d.chapter;
+    origPanel.dataset.bookName = d.book_name || '';
     if (d.orig_html) {
       origPanel.innerHTML = '<div class="orig-label">' + escHtml(d.orig_label || '') + '</div>' + d.orig_html;
       origPanel.setAttribute('dir', d.orig_rtl ? 'rtl' : 'ltr');
@@ -477,6 +573,7 @@ function applyChapter(d, url) {
 
   var layout = 'single';
   try { layout = localStorage.getItem('br-layout') || 'single'; } catch(e) {}
+  if (window.innerWidth <= 767 && $readerWrap && $readerWrap.dataset.interlinear === '1') layout = 'single';
   var isStrongs = $readerWrap && $readerWrap.dataset.strongs === '1';
   if (isStrongs) {
     if (origPanel) origPanel.classList.toggle('orig-visible', layout === 'columns');
@@ -492,9 +589,6 @@ function applyChapter(d, url) {
 
   document.getElementById('form-tid').value  = d.tid;
   document.getElementById('form-book').value = d.book_id;
-  document.getElementById('trans-tid').value  = d.tid;
-  document.getElementById('trans-book').value = d.book_id;
-  document.getElementById('trans-ch').value   = d.chapter;
   $chInput.value = d.chapter;
   $chInput.max   = d.num_chapters;
   $chMax.textContent = d.num_chapters;
@@ -502,6 +596,10 @@ function applyChapter(d, url) {
   document.querySelectorAll('.book-link').forEach(function(a) {
     a.classList.toggle('active', parseInt(a.dataset.tid) === d.tid && parseInt(a.dataset.book) === d.book_id);
   });
+
+  if (d.trans) {
+    document.querySelectorAll('.trans-select').forEach(function(sel) { sel.value = d.trans; });
+  }
 
   currentPrevUrl      = d.prev_url;
   currentNextUrl      = d.next_url;
@@ -523,6 +621,20 @@ function applyChapter(d, url) {
   }
   _spPinned = false;
   hideStrongsPopup();
+  if (focusVerse) scrollToVerse(focusVerse);
+}
+
+function scrollToVerse(v) {
+  var el = $reader.querySelector('.vnum[data-v="' + v + '"], [data-v="' + v + '"]');
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Interlinear: highlight the whole verse block
+  var block = el.closest('.interlinear-verse');
+  if (block) { block.classList.add('verse-hl'); return; }
+  // Regular reader: highlight vnum + following vtext
+  el.classList.add('verse-hl');
+  var next = el.nextElementSibling;
+  if (next && next.classList.contains('vtext')) next.classList.add('verse-hl');
 }
 
 function updateNavBtn(btn, url) {
@@ -542,9 +654,9 @@ function updateNavBtn(btn, url) {
 // The switching of translations
 // ---------------------------------------------------------------------------
 function switchTranslation(trans) {
-  var tid  = document.getElementById('trans-tid').value;
-  var book = document.getElementById('trans-book').value;
-  var ch   = document.getElementById('trans-ch').value;
+  var tid  = document.getElementById('form-tid').value;
+  var book = document.getElementById('form-book').value;
+  var ch   = document.getElementById('ch-input').value;
   window.location = BASE_PATH + trans.toLowerCase() + '/' + tid + '/' + book + '/' + ch;
 }
 
@@ -570,6 +682,16 @@ function closeOverflow()  { document.getElementById('overflow-menu').classList.r
 // A single handler for all clicks upon the document
 // ---------------------------------------------------------------------------
 document.addEventListener('click', function(e) {
+  // Intercept clicks on verse numbers in the original-language column
+  var origVnum = e.target.closest('.vnum[data-v]');
+  if (origVnum) {
+    var op = origVnum.closest('#reader-orig');
+    if (op) {
+      loadParallel(+op.dataset.tid, +op.dataset.book, +op.dataset.ch, +origVnum.dataset.v, op.dataset.bookName);
+      return;
+    }
+  }
+
   // Intercept navigation links, fetching chapters without a full reload
   var link = e.target.closest('a.nav-ajax');
   if (link) {
@@ -620,14 +742,27 @@ window.addEventListener('popstate', function(e) {
 // Keyboard shortcuts, for the swift of hand
 // ---------------------------------------------------------------------------
 document.addEventListener('keydown', function(e) {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  if (e.key === 'ArrowLeft'  && currentPrevUrl) { loadChapter(currentPrevUrl); return; }
-  if (e.key === 'ArrowRight' && currentNextUrl) { loadChapter(currentNextUrl); return; }
+  var searchOpen = !document.getElementById('search-overlay').hasAttribute('hidden');
+  // ESC closes search first; other panels handled when search is shut
   if (e.key === 'Escape') {
+    if (searchOpen) { closeSearch(); return; }
     closeParallel();
     if (_spPinned) { _spPinned = false; }
     hideStrongsPopup();
+    return;
   }
+  // Open search with / or Ctrl/Cmd+K (when not already in an input)
+  if (!searchOpen) {
+    if (e.key === '/' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
+      e.preventDefault(); openSearch(); return;
+    }
+    if (e.key === 'k' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault(); openSearch(); return;
+    }
+  }
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.key === 'ArrowLeft'  && currentPrevUrl) { loadChapter(currentPrevUrl); return; }
+  if (e.key === 'ArrowRight' && currentNextUrl) { loadChapter(currentNextUrl); return; }
 });
 
 // ---------------------------------------------------------------------------
@@ -794,6 +929,175 @@ document.addEventListener('mouseout', function(e) {
 _spopup.addEventListener('mouseleave', function() { if (!_spPinned) hideStrongsPopup(); });
 
 // ---------------------------------------------------------------------------
+// Search — seeking the scriptures
+// ---------------------------------------------------------------------------
+var _searchTid    = 0;
+var _searchTimer  = null;
+var _searchTrans  = <?= json_encode($_strans) ?>;
+var _searchTransTids = <?php
+    $std = [];
+    foreach ($TRANSLATIONS as $k => $t) {
+        if (!empty($t['interlinear']) || $k === 'KJVPlus') continue;
+        $std[$k] = $t['tids'];
+    }
+    echo json_encode($std);
+?>;
+var _searchActive = false;
+
+var $searchOverlay = document.getElementById('search-overlay');
+var $searchQ       = document.getElementById('search-q');
+var $searchStatus  = document.getElementById('search-status');
+var $searchResults = document.getElementById('search-results');
+
+function openSearch() {
+  $searchOverlay.removeAttribute('hidden');
+  _searchActive = true;
+  $searchQ.focus();
+  $searchQ.select();
+}
+
+function closeSearch() {
+  $searchOverlay.setAttribute('hidden', '');
+  _searchActive = false;
+}
+
+// Backdrop click closes
+$searchOverlay.addEventListener('click', function(e) {
+  if (e.target === $searchOverlay) closeSearch();
+});
+
+// Debounced input
+$searchQ.addEventListener('input', function() {
+  clearTimeout(_searchTimer);
+  var q = this.value.trim();
+  if (q.length < 3) {
+    $searchStatus.textContent = '';
+    $searchResults.innerHTML = '<p class="search-prompt">Type a word or phrase &mdash; <em>grace and peace</em>, <em>fear not</em>&hellip;</p>';
+    return;
+  }
+  $searchStatus.textContent = 'Searching\u2026';
+  _searchTimer = setTimeout(function() { execSearch(q); }, 350);
+});
+
+// Testament filter tabs (delegated — rebuilt dynamically when translation changes)
+document.getElementById('search-filters').addEventListener('click', function(e) {
+  var btn = e.target.closest('.sf');
+  if (!btn) return;
+  this.querySelectorAll('.sf').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  _searchTid = parseInt(btn.dataset.tid, 10);
+  var q = $searchQ.value.trim();
+  if (q.length >= 3) execSearch(q);
+});
+
+// Translation selector — rebuild tabs and re-run search
+document.getElementById('search-trans-sel').addEventListener('change', function() {
+  _searchTrans = this.value;
+  _searchTid   = 0;
+  rebuildFilterTabs(_searchTransTids[_searchTrans] || []);
+  var q = $searchQ.value.trim();
+  if (q.length >= 3) execSearch(q);
+  else { $searchStatus.textContent = ''; }
+});
+
+function rebuildFilterTabs(tids) {
+  var labels = {1: 'Old Testament', 2: 'New Testament', 3: 'Deuterocanonical'};
+  var html   = '<button class="sf active" data-tid="0">All</button>';
+  tids.forEach(function(t) {
+    html += '<button class="sf" data-tid="' + t + '">' + (labels[t] || t) + '</button>';
+  });
+  document.getElementById('search-filters').innerHTML = html;
+}
+
+function execSearch(q) {
+  var url = BASE_PATH + 'search.php?q=' + encodeURIComponent(q)
+          + '&trans=' + encodeURIComponent(_searchTrans)
+          + '&tid='   + _searchTid;
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(d) { renderSearch(d); })
+    .catch(function()  { $searchStatus.textContent = 'Search unavailable.'; });
+}
+
+function _escSr(s) {
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+function _highlight(text, words) {
+  var out = _escSr(text);
+  words.forEach(function(w) {
+    if (!w || w.length < 2) return;
+    out = out.replace(
+      new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
+      '<mark>$&</mark>'
+    );
+  });
+  return out;
+}
+
+function renderSearch(d) {
+  // Parse quoted phrases and bare words (mirrors search.php logic)
+  var words = [];
+  if (d.query) {
+    var re = /"([^"]+)"|(\S+)/g, m;
+    while ((m = re.exec(d.query)) !== null) {
+      var w = (m[1] || m[2]).replace(/"/g, '').trim();
+      if (w.length >= 2) words.push(w);
+    }
+  }
+
+  if (!d.results || d.results.length === 0) {
+    $searchStatus.textContent = '';
+    $searchResults.innerHTML = '<p class="search-prompt search-none">No results for \u201c' + _escSr(d.query) + '\u201d</p>';
+    return;
+  }
+
+  var countLabel = d.capped ? '200+ results' : (d.total + (d.total === 1 ? ' result' : ' results'));
+  $searchStatus.textContent = countLabel + ' for \u201c' + d.query + '\u201d';
+
+  // Group by book, preserving order
+  var bookOrder = [];
+  var byBook    = {};
+  d.results.forEach(function(r) {
+    var k = r.book || ('Book ' + r.bid);
+    if (!byBook[k]) { byBook[k] = []; bookOrder.push(k); }
+    byBook[k].push(r);
+  });
+
+  var html = '';
+  bookOrder.forEach(function(bookName) {
+    var vv = byBook[bookName];
+    html += '<div class="sr-group">'
+          + '<div class="sr-book-head">' + _escSr(bookName)
+          + ' <span class="sr-book-count">' + vv.length + '</span></div>';
+    vv.forEach(function(r) {
+      html += '<div class="sr-verse" data-url="' + _escSr(r.url) + '" data-v="' + r.v + '">'
+            + '<span class="sr-ref">' + r.ch + ':' + r.v + '</span>'
+            + '<span class="sr-text">' + _highlight(r.text, words) + '</span>'
+            + '</div>';
+    });
+    html += '</div>';
+  });
+
+  if (d.capped) {
+    html += '<p class="search-cap-note">Showing first 200 results \u2014 refine your search for more precise results.</p>';
+  }
+
+  $searchResults.innerHTML = html;
+  $searchResults.scrollTop = 0;
+}
+
+// Click a result to navigate and highlight the verse
+$searchResults.addEventListener('click', function(e) {
+  var verse = e.target.closest('.sr-verse');
+  if (!verse) return;
+  closeSearch();
+  loadChapter(verse.dataset.url, parseInt(verse.dataset.v, 10) || 0);
+});
+
+// ---------------------------------------------------------------------------
 // Upon loading, open the comparison panel if a verse be given in the URL
 // ---------------------------------------------------------------------------
 (function() {
@@ -801,5 +1105,6 @@ _spopup.addEventListener('mouseleave', function() { if (!_spPinned) hideStrongsP
   if (iv > 0) loadParallel(<?= $tid ?>, <?= $book_id ?>, <?= $chapter ?>, iv, <?= json_encode(book_display_name($tid, $book_id) ?? '') ?>);
 })();
 </script>
+<!-- with love, from Lubbock, TX -->
 </body>
 </html>

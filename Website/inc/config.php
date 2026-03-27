@@ -10,6 +10,7 @@ define('BASE_PATH', '/');
 $TRANSLATIONS = [
     'KJV'        => ['file' => 'KJV.db',        'label' => 'King James Version',      'rtl' => false, 'tids' => [1, 2]],
     'KJVPlus'    => ['file' => 'KJV.db',        'label' => "KJV + Strong's Numbers",  'rtl' => false, 'tids' => [1, 2], 'strongs' => true],
+    'Interlinear'=> ['file' => 'KJV.db',        'label' => 'Interlinear View (Unofficial)', 'rtl' => false, 'tids' => [1, 2], 'interlinear' => true],
     'Septuagint' => ['file' => 'Septuagint.db', 'label' => 'Septuagint (LXX)',        'rtl' => false, 'tids' => [1, 3]],
     'Vulgate'    => ['file' => 'Vulgate.db',     'label' => 'Latin Vulgate',           'rtl' => false, 'tids' => [1, 2]],
     'UGNT'       => ['file' => 'UGNT.db',        'label' => 'Greek New Testament',     'rtl' => false, 'tids' => [2]],

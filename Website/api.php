@@ -128,6 +128,7 @@ function fetch_strongs_verse(string $bibles_dir, int $tid, int $book_id, int $ch
 $result = [];
 
 foreach ($TRANSLATIONS as $key => $t) {
+    if (!empty($t['interlinear'])) continue;
     if (!in_array($tid, $t['tids'], true)) {
         $result[] = ['translation' => $key, 'label' => $t['label'], 'text' => '', 'rtl' => $t['rtl']];
         continue;

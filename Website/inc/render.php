@@ -34,7 +34,7 @@ function book_display_name(int $tid, int $book_id): ?string {
          5 => 'Sirach',           6 => 'Baruch',            7 => 'Epistle of Jeremiah',  8 => 'Susanna',
          9 => 'Bel and the Dragon',10 => '1 Maccabees',    11 => '2 Maccabees',        12 => '3 Maccabees',
         13 => '4 Maccabees',     14 => '1 Esdras',         15 => '2 Esdras',           16 => 'Prayer of Manasseh',
-        17 => 'Prayer of Azariah',18 => 'Odes',            19 => 'Psalms of Solomon',  20 => 'Joshua (B Text)',
+        17 => 'Prayer of Azariah',18 => 'Odes',            19 => 'Psalms of Solomon',  20 => 'Joshua (A Text)',
         21 => 'Judges (B Text)', 22 => 'Laodiceans',
     ];
     if ($tid === 1) return $OT[$book_id] ?? null;
@@ -51,7 +51,8 @@ function nav_url(string $trans, int $tid, int $book, int $ch): string {
 }
 
 // ---------------------------------------------------------------------------
-// render_orig_col() — rendereth the original-language text for the second column
+// render_orig_col() — rendereth the original-language text for the second column.
+// Verse numbers bear only data-v; the onclick is delegated from #reader-orig.
 // ---------------------------------------------------------------------------
 function render_orig_col(array $verses): string {
     if (!$verses) return '<p class="orig-empty">—</p>';
@@ -78,11 +79,85 @@ function render_orig_col(array $verses): string {
             continue;
         }
 
-        $out .= '<sup class="vnum">' . $vid . '</sup>'
+        $out .= '<sup class="vnum" data-v="' . $vid . '">' . $vid . '</sup>'
               . '<span class="vtext">' . htmlspecialchars($text) . '</span> ';
     }
 
     if ($in_para) $out .= "</p>\n";
+    return $out;
+}
+
+// ---------------------------------------------------------------------------
+// render_interlinear_html() — the interlinear view: KJV with Strong's
+// mouseovers atop the Greek, atop the Hebrew, verse by verse.
+// Called alike for full-page load and for AJAX chapter navigation.
+// ---------------------------------------------------------------------------
+function render_interlinear_html(
+    bool $db_ok, array $verses, string $book_title, int $chapter,
+    int $tid, int $book_id,
+    ?string $prev_url, ?string $next_url,
+    array $verse_html = [], array $grk_verses = [], array $heb_verses = []
+): string {
+    $out = '';
+
+    if (!$db_ok) {
+        $out .= '<p class="error-msg">Could not open the database.</p>';
+    } elseif (empty($verses)) {
+        $out .= '<p class="error-msg">No verses found for this chapter.</p>';
+    } else {
+        // Index the parallel verses by verse_id, that they may be found swiftly
+        $grk = [];
+        foreach ($grk_verses as $v) {
+            if ($v['verse_id'] > 0) $grk[(int)$v['verse_id']] = $v['text'];
+        }
+        $heb = [];
+        foreach ($heb_verses as $v) {
+            if ($v['verse_id'] > 0) $heb[(int)$v['verse_id']] = $v['text'];
+        }
+
+        $out .= '<h1 class="chapter-heading">' . $book_title
+              . '<span class="chapter-label">Chapter ' . $chapter . "</span></h1>\n";
+
+        foreach ($verses as $v) {
+            $vid  = (int)$v['verse_id'];
+            $text = $v['text'];
+
+            if ($vid === 0) {
+                $out .= '<h2 class="verse-heading">' . htmlspecialchars($text) . "</h2>\n";
+                continue;
+            }
+
+            $onclick = 'onclick="loadParallel(' . $tid . ',' . $book_id . ',' . $chapter . ',' . $vid . ','
+                     . htmlspecialchars(json_encode(book_display_name($tid, $book_id) ?? '')) . ')"';
+            $eng = isset($verse_html[$vid]) ? $verse_html[$vid] : htmlspecialchars($text);
+
+            $out .= '<div class="interlinear-verse">' . "\n"
+                  . '  <span class="vnum interlinear-vnum" data-v="' . $vid . '" ' . $onclick . '>' . $vid . '</span>' . "\n"
+                  . '  <div class="interlinear-body">' . "\n"
+                  . '    <div class="interlinear-eng">' . $eng . '</div>' . "\n";
+
+            if (isset($grk[$vid])) {
+                $out .= '    <div class="interlinear-grk">' . htmlspecialchars($grk[$vid]) . '</div>' . "\n";
+            }
+            if (isset($heb[$vid])) {
+                $out .= '    <div class="interlinear-heb" dir="rtl">' . htmlspecialchars($heb[$vid]) . '</div>' . "\n";
+            }
+
+            $out .= "  </div>\n"
+                  . "</div>\n";
+        }
+    }
+
+    if ($prev_url || $next_url) {
+        $prev = $prev_url
+            ? '<a href="' . $prev_url . '" class="nav-btn-lg nav-ajax">&lsaquo; Previous</a>'
+            : '<span class="nav-btn-lg disabled"></span>';
+        $next = $next_url
+            ? '<a href="' . $next_url . '" class="nav-btn-lg nav-ajax">Next &rsaquo;</a>'
+            : '<span class="nav-btn-lg disabled"></span>';
+        $out .= '<div class="bottom-nav">' . $prev . $next . "</div>\n";
+    }
+
     return $out;
 }
 
@@ -137,7 +212,7 @@ function render_reader_html(
             } elseif ($is_kjv && $first_verse && $vid === 1 && $text !== '') {
                 preg_match('/^./us', $text, $m);
                 $dc_char = $m[0] ?? '';
-                $out .= '<span class="dropcap-wrap">'
+                $out .= '<span class="dropcap-wrap" data-v="1">'
                       . '<span class="dropcap" title="Compare verse 1 across translations" ' . $onclick . '>'
                       . htmlspecialchars($dc_char) . '</span>'
                       . htmlspecialchars(substr($text, strlen($dc_char)))
